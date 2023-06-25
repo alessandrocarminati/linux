@@ -1,0 +1,229 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
+#include <stdbool.h>
+#include <assert.h>
+#include "item_list.h"
+
+struct item *list_index[96] = {0};
+#ifdef DEBUG
+int item_alloc_cnt;
+#endif
+
+
+void build_index(struct item *list)
+{
+	struct item *current = list;
+	char current_first_letter = ' ';
+
+	while (current) {
+		if (current->symb_name[0] != current_first_letter) {
+			current_first_letter = current->symb_name[0];
+			list_index[current_first_letter - 32] = current;
+			}
+		current = current->next;
+		}
+}
+
+struct item *add_item(struct item **list, const char *name, char stype, uint64_t addr)
+{
+#ifdef DEBUG
+	item_alloc_cnt++;
+#endif
+	struct item *new_item = (struct item *)malloc(sizeof(struct item));
+
+	strncpy(new_item->symb_name, name, MAX_NAME_SIZE);
+	new_item->addr = addr;
+	new_item->stype = stype;
+	new_item->next = NULL;
+	struct item *current;
+
+	if (!(*list)) {
+		*list = new_item;
+	} else {
+		current = *list;
+		while (current->next)
+			current = current->next;
+		current->next = new_item;
+	}
+	return new_item;
+}
+
+void sort_list(struct item **list, int sort_by)
+{
+	struct item *current = *list;
+	struct item *sorted = NULL;
+	struct item *next_item;
+	struct item *temp;
+
+	if (!(*list) || !((*list)->next))
+		return;
+
+	while (current) {
+		next_item = current->next;
+		if (!sorted ||
+		    (sort_by == BY_ADDRESS && current->addr < sorted->addr) ||
+		    (sort_by == BY_NAME && strcmp(current->symb_name, sorted->symb_name) < 0)) {
+			current->next = sorted;
+			sorted = current;
+		} else {
+			temp = sorted;
+			while (temp->next &&
+			      ((sort_by == BY_ADDRESS && current->addr >= temp->next->addr) ||
+			      (sort_by == BY_NAME &&
+			      strcmp(current->symb_name, temp->next->symb_name) >= 0))) {
+				temp = temp->next;
+				}
+			current->next = temp->next;
+			temp->next = current;
+		}
+		current = next_item;
+	}
+	*list = sorted;
+}
+
+struct item *merge(struct item *left, struct item *right, int sort_by)
+{
+	struct item *result = NULL;
+	struct item *current = NULL;
+
+	if (!left)
+		return right;
+	if (!right)
+		return left;
+
+	if (sort_by == BY_NAME) {
+		if (strcmp(left->symb_name, right->symb_name) <= 0) {
+			result = left;
+			left = left->next;
+		} else {
+			result = right;
+			right = right->next;
+		}
+	} else {
+		if (sort_by == BY_ADDRESS) {
+			if (left->addr <= right->addr) {
+				result = left;
+				left = left->next;
+			} else {
+				result = right;
+				right = right->next;
+			}
+		}
+	}
+
+	current = result;
+
+	while (left && right) {
+		if (sort_by == BY_NAME) {
+			if (strcmp(left->symb_name, right->symb_name) <= 0) {
+				current->next = left;
+				left = left->next;
+			} else {
+				current->next = right;
+				right = right->next;
+			}
+		} else {
+			if (sort_by == BY_ADDRESS) {
+				if (left->addr <= right->addr) {
+					current->next = left;
+					left = left->next;
+				} else {
+					current->next = right;
+					right = right->next;
+				}
+			}
+		}
+
+		current = current->next;
+	}
+
+	if (left) {
+		current->next = left;
+	} else {
+		if (right)
+			current->next = right;
+	}
+
+	return result;
+}
+
+struct item *merge_sort(struct item *head, int sort_by)
+{
+	struct item *slow;
+	struct item *fast;
+	struct item *left;
+	struct item *right;
+
+	if (!head || !head->next)
+		return head;
+
+	slow = head;
+	fast = head->next;
+
+	while (fast && fast->next) {
+		slow = slow->next;
+		fast = fast->next->next;
+	}
+
+	left = head;
+	right = slow->next;
+	slow->next = NULL;
+
+	left = merge_sort(left, sort_by);
+	right = merge_sort(right, sort_by);
+
+	return merge(left, right, sort_by);
+}
+
+void sort_list_m(struct item **head, int sort_by)
+{
+	if (!(*head) || !((*head)->next))
+		return;
+
+	*head = merge_sort(*head, sort_by);
+}
+
+int insert_after(struct item *list, const uint64_t search_addr,
+		 const char *name, uint64_t addr, char stype)
+{
+	struct item *new_item;
+	int ret = 0;
+	struct item *current = (list_index[name[0] - 32]) ? list_index[name[0] - 32] : list;
+
+	while (current) {
+		if (current->addr == search_addr) {
+#ifdef DEBUG
+			item_alloc_cnt++;
+#endif
+			new_item = (struct item *)malloc(sizeof(struct item));
+			strncpy(new_item->symb_name, name, MAX_NAME_SIZE);
+			new_item->addr = addr;
+			new_item->stype = stype;
+			new_item->next = current->next;
+			current->next = new_item;
+			ret = 1;
+			break;
+		}
+		current = current->next;
+	}
+	assert(ret != 0);
+	return ret;
+}
+
+void free_items(struct item **head)
+{
+	struct item *app, *item_iterator = *head;
+
+	while (item_iterator) {
+		app = item_iterator;
+		item_iterator = item_iterator->next;
+		free(app);
+#ifdef DEBUG
+		item_alloc_cnt--;
+#endif
+	}
+	*head = NULL;
+}

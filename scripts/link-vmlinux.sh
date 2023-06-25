@@ -161,7 +161,8 @@ kallsyms()
 	fi
 
 	info KSYMS ${2}
-	scripts/kallsyms ${kallsymopt} ${1} > ${2}
+	scripts/kas_alias/kas_alias ${1} >${1}.alias
+	scripts/kallsyms ${kallsymopt} ${1}.alias > ${2}
 }
 
 # Perform one step in kallsyms generation, including temporary linking of
