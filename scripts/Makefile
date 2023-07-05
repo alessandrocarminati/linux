@@ -49,3 +49,7 @@ subdir-$(CONFIG_SECURITY_SELINUX) += selinux
 
 # Let clean descend into subdirs
 subdir-	+= basic dtc gdb kconfig mod
+
+# KALLSyms alias
+subdir-$(CONFIG_KALLSYMS_ALIAS) += kas_alias
+

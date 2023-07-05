@@ -89,8 +89,9 @@ vmlinux_link()
 
 	ldflags="${ldflags} ${wl}--script=${objtree}/${KBUILD_LDS}"
 
-	# The kallsyms linking does not need debug symbols included.
-	if [ "$output" != "${output#.tmp_vmlinux.kallsyms}" ] ; then
+	# The kallsyms linking does not need debug symbols included, unless the KALLSYMS_ALIAS.
+	if [ ! is_enabled CONFIG_KALLSYMS_ALIAS ] && \
+	    [ "$output" != "${output#.tmp_vmlinux.kallsyms}" ] ; then
 		ldflags="${ldflags} ${wl}--strip-debug"
 	fi
 
@@ -161,7 +162,11 @@ kallsyms()
 	fi
 
 	info KSYMS ${2}
-	scripts/kallsyms ${kallsymopt} ${1} > ${2}
+	if is_enabled CONFIG_KALLSYMS_ALIAS; then
+		ALIAS=".alias"
+		scripts/kas_alias/kas_alias ${1} >${1}${ALIAS}
+		fi
+	scripts/kallsyms ${kallsymopt} ${1}${ALIAS} > ${2}
 }
 
 # Perform one step in kallsyms generation, including temporary linking of
