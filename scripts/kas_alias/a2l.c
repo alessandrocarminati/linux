@@ -23,11 +23,10 @@ static char *normalize_path(const char *input_path, char *output_path)
 {
 	char *prev_token = NULL;
 	char *delimiter = "/";
-	char inbuf[MAX_BUF];
+	char inbuf[MAX_BUF] = {0};
 	char *token;
 	char *pos;
 
-	memset(inbuf, 0, MAX_BUF);
 	*output_path = '\0';
 	strncpy(inbuf, input_path, MAX_BUF);
 	if (!input_path || !output_path || strlen(input_path) == 0)
@@ -87,7 +86,7 @@ int addr2line_init(const char *cmd, const char *vmlinux)
 	if ((!file_exists(cmd)) || (!file_exists(vmlinux))) {
 		printf("file not found\n");
 		return 0;
-		}
+	}
 
 	path_of(vmlinux, vmlinux_path);
 	if (pipe(a2l_in) == -1) {
@@ -145,7 +144,7 @@ const char *remove_subdir(const char *home, const char *f_path)
 {
 	int i = 0;
 
-	while (*(home + i) == *(f_path + i))
+	while (home[i] == f_path[i])
 		i++;
 
 	return (strlen(home) != i) ? NULL : f_path + i;
@@ -226,14 +225,18 @@ static char *find_executable(const char *command)
 
 const char *get_addr2line(int mode)
 {
+	int buf_len = 0;
 	char *buf = "";
 
 	switch (mode) {
 	case A2L_CROSS:
 		buf = getenv("CROSS_COMPILE");
-		memcpy(addr2line_cmd, buf, strlen(buf));
-	case A2L_DEFAULT:
-		memcpy(addr2line_cmd + strlen(buf), ADDR2LINE, strlen(ADDR2LINE));
+		if (buf) {
+			memcpy(addr2line_cmd, buf, strlen(buf));
+			buf_len = strlen(buf);
+		}
+	case A2L_NATIVE_ONLY:
+		memcpy(addr2line_cmd + buf_len, ADDR2LINE, strlen(ADDR2LINE));
 		buf = find_executable(addr2line_cmd);
 		if (buf) {
 			memcpy(addr2line_cmd, buf, strlen(buf));

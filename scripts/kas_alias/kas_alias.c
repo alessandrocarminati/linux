@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <stdarg.h>
 #include <regex.h>
+#include <ctype.h>
 
 #include "item_list.h"
 #include "duplicates_list.h"
@@ -16,6 +17,8 @@
 #define SYMB_IS_DATA(s) ((((s)->stype) == 'b') ||  (((s)->stype) == 'B') || \
 			 (((s)->stype) == 'd') ||  (((s)->stype) == 'D') || \
 			 (((s)->stype) == 'r') ||  (((s)->stype) == 'R'))
+#define NEED2NORMALIZE(str_to_norm, chr_pos)
+	(!isalnum((str_to_norm)[(chr_pos)]) && ((str_to_norm)[(chr_pos)] != '@'))
 #ifdef CONFIG_KALLSYMS_ALIAS_DATA
 #define SYMB_NEEDS_ALIAS(s) (SYMB_IS_TEXT(s) || SYMB_IS_DATA(s))
 #else
@@ -76,16 +79,10 @@ static void create_file_suffix(const char *name, uint64_t address, char *output_
 	if (f_path) {
 		sprintf(output_suffix, "%s@%s", name, f_path);
 		while (*(output_suffix + i) != '\0') {
-			switch (*(output_suffix + i)) {
-			case '/':
-			case ':':
-			case '.':
+			if (NEED2NORMALIZE(output_suffix, i))
 				*(output_suffix + i) = '_';
-				break;
-			default:
+			i++;
 			}
-		i++;
-		}
 	} else {
 		create_suffix(name, output_suffix);
 	}
@@ -146,7 +143,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	if (!addr2line_init(get_addr2line(A2L_DEFAULT), get_vmlinux(argv[1])))
+	if (!addr2line_init(get_addr2line(A2L_CROSS), get_vmlinux(argv[1])))
 		return 1;
 
 	while (fscanf(fp, "%lx %c %99s\n", &address, &t, sym_name) == 3) {

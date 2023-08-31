@@ -1737,7 +1737,7 @@ config KALLSYMS_BASE_RELATIVE
 	  time constants, and no relocation pass is required at runtime to fix
 	  up the entries based on the runtime load address of the kernel.
 
-config KALLSYMS_ALIAS
+config KALLSYMS_ALIAS_SRCLINE
 	bool "Produces alias for duplicated symbols" if EXPERT
 	depends on KALLSYMS && (DEBUG_INFO_DWARF4 || DEBUG_INFO_DWARF5)
 	help
@@ -1748,23 +1748,22 @@ config KALLSYMS_ALIAS
 	  functions using infrastructure like ftrace or kprobe.
 
 	  This option addresses this challenge by extending the symbol names
-	  with unique suffixes during the kernel build process.
-	  The newly created aliases for these duplicated symbols are unique
-	  names that can be fed to the ftrace sysfs interface. By doing so, it
-	  enables previously unreachable symbols to be probed.
+	  with unique suffixes made by decorating the original name with
+	  the suorce file name and line number collected during the kernel
+	  build process.
 
-config CONFIG_KALLSYMS_ALIAS_DATA
+config KALLSYMS_ALIAS_DATA
 	bool "Produces alias also for data"
-	depends on KALLSYMS_ALIAS
+	depends on KALLSYMS_ALIAS_SRCLINE
 	help
 	  Sometimes it can be useful to refer to data. In live patch scenarios,
 	  you may find yourself needing to use symbols that are shared with
 	  other functions. Since symbols face the same issue as functions, this
 	  option allows you to create aliases for data as well.
 
-config CONFIG_KALLSYMS_ALIAS_DATA_ALL
+config KALLSYMS_ALIAS_DATA_ALL
 	bool "Removes all filter when producing data alias"
-	depends on CONFIG_KALLSYMS_ALIAS_DATA
+	depends on KALLSYMS_ALIAS_DATA
 	help
 	  When selecting data aliases, not all symbols are included in the set
 	  This is because many symbols are unlikely to be used. If you choose

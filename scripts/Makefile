@@ -51,5 +51,5 @@ subdir-$(CONFIG_SECURITY_SELINUX) += selinux
 subdir-	+= basic dtc gdb kconfig mod
 
 # KALLSyms alias
-subdir-$(CONFIG_KALLSYMS_ALIAS) += kas_alias
+subdir-$(CONFIG_KALLSYMS_ALIAS_SRCLINE) += kas_alias
 

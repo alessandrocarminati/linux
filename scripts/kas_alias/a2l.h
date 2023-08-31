@@ -5,12 +5,11 @@
 
 #define ADDR2LINE "addr2line"
 #define ADDR2LINE_ARGS "-fe"
-//#define VMLINUX "vmlinux"
 #define MAX_BUF 4096
 #define MAX_CMD_LEN 256
 #define P_READ 0
 #define P_WRITE 1
-#define A2L_DEFAULT 1
+#define A2L_NATIVE_ONLY 1
 #define A2L_CROSS 2
 #define A2L_LLVM 3
 #define A2L_MAKE_VALUE 2
