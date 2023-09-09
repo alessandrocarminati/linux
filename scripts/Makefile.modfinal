@@ -15,6 +15,32 @@ include $(srctree)/scripts/Makefile.lib
 # find all modules listed in modules.order
 modules := $(call read-file, $(MODORDER))
 
+ifeq ($(KBUILD_BUILTIN),y)
+  ifeq ($(or $(CONFIG_DEBUG_INFO_BTF_MODULES),$(CONFIG_KALLSYMS_ALIAS_SRCLINE)),y)
+    VMLINUX_DEP := vmlinux
+  endif
+endif
+
+VMLINUX_DEP ?=
+
+ifeq ($(CONFIG_KALLSYMS_ALIAS_SRCLINE),y)
+  ifeq ($(CONFIG_KALLSYMS_ALIAS_SRCLINE_DATA),y)
+    KAS_DATA := --process_data
+  endif
+
+  ifdef KAS_ALIAS_DEBUG
+      DEBUG_FLAG := $(KAS_ALIAS_DEBUG)
+  else
+      DEBUG_FLAG := 0
+  endif
+
+  KAS_ALIAS_MODULE_CMD := $(srctree)/scripts/kas_alias.py --symbol_frequency $(extmod_prefix)modules.symbfreq \
+  --debug $(DEBUG_FLAG)  --nm $(NM) $(KAS_DATA) \
+  --addr2line $(ADDR2LINE) --basedir $(srctree) --separator @ \
+  single_module \
+  --objcopy $(OBJCOPY) --objdump $(OBJDUMP) --target-module
+endif
+
 __modfinal: $(modules:%.o=%.ko)
 	@:
 
@@ -30,6 +56,7 @@ quiet_cmd_cc_o_c = CC [M]  $@
 
 quiet_cmd_ld_ko_o = LD [M]  $@
       cmd_ld_ko_o +=							\
+	[ "$(KAS_ALIAS_MODULE_CMD)" != "" ] && $(KAS_ALIAS_MODULE_CMD) $<;	\
 	$(LD) -r $(KBUILD_LDFLAGS)					\
 		$(KBUILD_LDFLAGS_MODULE) $(LDFLAGS_MODULE)		\
 		-T scripts/module.lds -o $@ $(filter %.o, $^)
@@ -52,7 +79,7 @@ if_changed_except = $(if $(call newer_prereqs_except,$(2))$(cmd-check),      \
 	printf '%s\n' 'savedcmd_$@ := $(make-cmd)' > $(dot-target).cmd, @:)
 
 # Re-generate module BTFs if either module's .ko or vmlinux changed
-%.ko: %.o %.mod.o scripts/module.lds $(and $(CONFIG_DEBUG_INFO_BTF_MODULES),$(KBUILD_BUILTIN),vmlinux) FORCE
+%.ko: %.o %.mod.o scripts/module.lds $(VMLINUX_DEP) FORCE
 	+$(call if_changed_except,ld_ko_o,vmlinux)
 ifdef CONFIG_DEBUG_INFO_BTF_MODULES
 	+$(if $(newer-prereqs),$(call cmd,btf_ko))
@@ -65,7 +92,6 @@ targets += $(modules:%.o=%.ko) $(modules:%.o=%.mod.o)
 
 PHONY += FORCE
 FORCE:
-
 # Read all saved command lines and dependencies for the $(targets) we
 # may be building above, using $(if_changed{,_dep}). As an
 # optimization, we don't need to read them if the target does not
