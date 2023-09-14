@@ -12,14 +12,13 @@
 #include <linux/string.h>
 #include <linux/verification.h>
 #include <linux/security.h>
-#include <linux/proc_fs.h>
-#include <linux/seq_file.h>
 #include <crypto/public_key.h>
 #include <uapi/linux/module.h>
 #include "internal.h"
 
 #undef MODULE_PARAM_PREFIX
 #define MODULE_PARAM_PREFIX "module."
+
 int module_sig_check_wait;
 
 static bool sig_enforce = IS_ENABLED(CONFIG_MODULE_SIG_FORCE);
@@ -49,49 +48,48 @@ static int __init module_sig_check_wait_arg(char *str)
 }
 __setup("module_sig_check_wait=", module_sig_check_wait_arg);
 
-static int module_sig_check_wait_read(struct seq_file *m, void *v)
+/*
+ * securityfs entry to disable module_sig_check_wait, and start enforcing modules signature check
+ */
+static ssize_t module_sig_check_wait_read(struct file *file, char __user *buf, size_t count,
+					  loff_t *ppos)
 {
-	seq_printf(m, "%d\n", module_sig_check_wait);
-	return 0;
+	return simple_read_from_buffer(buf, count, ppos,
+				       module_sig_check_wait == 1 ? "1\n" : "0\n", 2);
 }
 
-static ssize_t module_sig_check_wait_write(struct file *file, const char __user *ubuf,
-					   size_t count, loff_t *ppos)
+static ssize_t module_sig_check_wait_write(struct file *file, const char __user *buf,
+					   size_t n, loff_t *ppos)
 {
 	int tmp;
 
-	if (kstrtoint_from_user(ubuf, count, 10, &tmp))
+	if (kstrtoint_from_user(buf, n, 10, &tmp))
 		return -EINVAL;
 	if (tmp != 0) {
 		pr_info("module_sig_check_wait can be only disabled!\n");
 		return -EINVAL;
-		}
+	}
 	pr_info("module_sig_check_wait disabled!\n");
 	module_sig_check_wait = tmp;
 
-	return count;
+	return n;
 }
 
-static int module_sig_check_wait_proc_open(struct inode *inode, struct  file *file)
-{
-	return single_open(file, module_sig_check_wait_read, NULL);
-}
-
-static const struct proc_ops module_sig_check_wait_ops = {
-	.proc_open      = module_sig_check_wait_proc_open,
-	.proc_read      = seq_read,
-	.proc_lseek     = seq_lseek,
-	.proc_release   = single_release,
-	.proc_write     = module_sig_check_wait_write,
+static const struct file_operations module_sig_check_wait_ops = {
+	.read  = module_sig_check_wait_read,
+	.write = module_sig_check_wait_write,
 };
 
-static int __init module_sig_check_wait_init(void)
+static int __init module_sig_check_wait_secfs_init(void)
 {
-	proc_create("module_sig_check_wait", 0, NULL,
-		    &module_sig_check_wait_ops);
-	return 0;
+	struct dentry *dentry;
+
+	dentry = securityfs_create_file("module_sig_check_wait", 0644, NULL, NULL,
+					&module_sig_check_wait_ops);
+	return PTR_ERR_OR_ZERO(dentry);
 }
-module_init(module_sig_check_wait_init);
+
+core_initcall(module_sig_check_wait_secfs_init);
 
 /*
  * Verify the signature on a module.
