@@ -1752,17 +1752,6 @@ config KALLSYMS_ALIAS_SRCLINE
 	  symbol names that include the file name and line where the symbols
 	  are defined in the source code.
 
-config KALLSYMS_ALIAS_SRCLINE_SEPARATOR
-	string "Character used to separate the symbol name from the srcline string"
-	depends on KALLSYMS_ALIAS_SRCLINE
-	default "@"
-	help
-	  Use this configuration item to specify the character that separates
-	  the symbol name part and the srcline part in symbol aliases.
-	  This field is intended to be a single character and is used to define
-	  the delimiter for creating meaningful symbol aliases.
-	  Warning: If more than one char, only the first will be used.
-
 config KALLSYMS_ALIAS_SRCLINE_DATA
 	bool "Produces alias also for global variables names"
 	depends on KALLSYMS_ALIAS_SRCLINE

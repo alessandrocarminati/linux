@@ -36,10 +36,6 @@ is_enabled() {
 	grep -q "^$1=y" include/config/auto.conf
 }
 
-fetch_conf_data() {
-	grep "$1" include/config/auto.conf|cut -d"=" -f2-
-}
-
 # Nice output in kbuild format
 # Will be supressed by "make -s"
 info()
@@ -177,10 +173,9 @@ kallsyms()
 	fi
 	if is_enabled CONFIG_KALLSYMS_ALIAS_SRCLINE; then
 		ALIAS=".alias"
-		SEP="`fetch_conf_data KALLSYMS_ALIAS_SRCLINE_SEPARATOR`"
-		scripts/kas_alias.py \
+		${srctree}/scripts/kas_alias.py \
 			-a ${ADDR2LINE} -v ${kallsyms_vmlinux} -n ${1} \
-			-o ${1}${ALIAS} -s ${SEP%"${SEP#?}"} ${KAS_DATA}
+			-o ${1}${ALIAS} -s @ ${KAS_DATA}
 	fi
 	scripts/kallsyms ${kallsymopt} ${1}${ALIAS} > ${2}
 }
