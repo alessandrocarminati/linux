@@ -169,13 +169,14 @@ kallsyms()
 	ALIAS=""
 	KAS_DATA=""
 	if is_enabled CONFIG_KALLSYMS_ALIAS_SRCLINE_DATA; then
-		KAS_DATA="-d"
+		KAS_DATA="--data"
 	fi
 	if is_enabled CONFIG_KALLSYMS_ALIAS_SRCLINE; then
 		ALIAS=".alias"
 		${srctree}/scripts/kas_alias.py \
-			-a ${ADDR2LINE} -v ${kallsyms_vmlinux} -n ${1} \
-			-o ${1}${ALIAS} -s @ ${KAS_DATA}
+			--addr2line ${ADDR2LINE} --vmlinux ${kallsyms_vmlinux} \
+			--nmdata ${1} --outfile ${1}${ALIAS} \
+			--basedir ${srctree} --separator @ ${KAS_DATA}
 	fi
 	scripts/kallsyms ${kallsymopt} ${1}${ALIAS} > ${2}
 }
