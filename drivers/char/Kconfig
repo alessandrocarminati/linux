@@ -318,8 +318,8 @@ config DEVMEM
 	  When in doubt, say "Y".
 
 config DEVMEM_KUNIT_TEST
-	bool "KUnit tests for /dev/mem"
-	depends on KUNIT && DEVMEM
+	tristate "KUnit tests for /dev/mem" if !KUNIT_ALL_TESTS
+	depends on KUNIT
 	default KUNIT_ALL_TESTS
 	help
 	  Enables in-kernel unit tests for /dev/mem read/write logic.

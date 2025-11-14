@@ -4,6 +4,10 @@
  */
 
 #include <kunit/test.h>
+#include <linux/mm.h>
+#include <linux/mman.h>
+
+#include "mem.h"
 
 struct mem_test_ctx {
 	char *kmem;
