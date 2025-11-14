@@ -33,6 +33,8 @@
 
 #include <kunit/visibility.h>
 
+#include "mem.h"
+
 #define DEVMEM_MINOR	1
 #define DEVPORT_MINOR	4
 

@@ -7,9 +7,9 @@
 #define _LINUX_CHAR_MEM_H
 
 #if IS_ENABLED(CONFIG_KUNIT)
-static ssize_t read_mem(struct file *file, char __user *buf,
+ssize_t read_mem(struct file *file, char __user *buf,
 			size_t count, loff_t *ppos);
-static ssize_t write_mem(struct file *file, const char __user *buf,
+ssize_t write_mem(struct file *file, const char __user *buf,
 			 size_t count, loff_t *ppos);
 #endif
 
