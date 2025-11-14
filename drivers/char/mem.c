@@ -789,3 +789,7 @@ static int __init chr_dev_init(void)
 }
 
 fs_initcall(chr_dev_init);
+
+#ifdef CONFIG_DEVMEM_KUNIT_TEST
+#include "mem_kunit_test.c"
+#endif
