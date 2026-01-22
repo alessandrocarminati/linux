@@ -168,12 +168,14 @@ static void read_mem_invalid_offset_test(struct kunit *test)
 {
 	struct file fake_file = { };
 	struct mem_test_ctx *ctx = test->priv;
-	loff_t pos = -1;
+	loff_t ppos = -1;
+	loff_t ppos0 = ppos;
 	ssize_t ret;
 
-	ret = read_mem(&fake_file, ctx->umem, PAGE_SIZE / 2, &pos);
+	ret = read_mem(&fake_file, ctx->umem, PAGE_SIZE / 2, &ppos);
 
 	KUNIT_EXPECT_EQ(test, ret, -EFAULT);
+	KUNIT_EXPECT_EQ(test, ppos, ppos0);
 }
 
 /**
@@ -206,26 +208,30 @@ static void read_mem_valid_basic_test(struct kunit *test)
 	struct mem_test_ctx *ctx = test->priv;
 	struct file fake_file = { };
 	size_t len = PAGE_SIZE / 2;
-	loff_t pos = 0;
+	loff_t ppos = 0;
+	loff_t ppos0 = ppos;
 	ssize_t ret;
 
-	ret = read_mem(&fake_file, ctx->umem, len, &pos);
+	ret = read_mem(&fake_file, ctx->umem, len, &ppos);
 
 	if (!valid_phys_addr_range(0, len)) {
 		kunit_info(test,
 			   "phys range [0, %zu) not valid on this arch; expect -EFAULT\n",
 			   len);
 		KUNIT_EXPECT_EQ(test, ret, (ssize_t)-EFAULT);
+		KUNIT_EXPECT_EQ(test, ppos, ppos0);
 		return;
 	}
 
 #if defined(CONFIG_X86)
 	kunit_info(test, "x86: read from phys 0 should not error\n");
 	KUNIT_EXPECT_GE(test, ret, 0);
+	KUNIT_EXPECT_EQ(test, ppos, ppos0 + len);
 #else
 	kunit_info(test,
 		   "non-x86: phys 0 valid; accept success or -EPERM depending on policy\n");
 	KUNIT_EXPECT_TRUE(test, ret >= 0 || ret == -EPERM);
+	KUNIT_EXPECT_EQ(test, ppos, ppos0);
 #endif
 }
 
@@ -247,7 +253,8 @@ static void read_mem_read_1M_le_at_0(struct kunit *test)
 	struct mem_test_ctx *ctx = test->priv;
 	size_t len = PAGE_SIZE / 2;
 	phys_addr_t pa = 0;
-	loff_t pos = pa;
+	loff_t ppos = pa;
+	loff_t ppos0 = ppos;
 	void *direct;
 	int ret;
 
@@ -255,9 +262,10 @@ static void read_mem_read_1M_le_at_0(struct kunit *test)
 		kunit_skip(test, "0 is invalid in this arch.");
 		return;
 	}
-	ret = read_mem(&fake_file, ctx->umem, len, &pos);
+	ret = read_mem(&fake_file, ctx->umem, len, &ppos);
 
 	KUNIT_ASSERT_EQ(test, ret, len);
+	KUNIT_EXPECT_EQ(test, ppos, ppos0 + len);
 
 #ifdef MEM_KUNIT_TEST_DEBUG
 	direct = phys_to_virt(pa);
@@ -288,7 +296,8 @@ static void read_mem_read_1M_le_at_ram(struct kunit *test)
 	struct mem_test_ctx *ctx = test->priv;
 	size_t len = PAGE_SIZE / 2;
 	phys_addr_t pa = 0x20000;
-	loff_t pos = pa;
+	loff_t ppos = pa;
+	loff_t ppos0 = ppos;
 	void *direct;
 	int ret;
 
@@ -296,12 +305,13 @@ static void read_mem_read_1M_le_at_ram(struct kunit *test)
 
 	memset(direct, 0xaa, len);
 
-	ret = read_mem(&fake_file, ctx->umem, len, &pos);
+	ret = read_mem(&fake_file, ctx->umem, len, &ppos);
 
 #ifdef MEM_KUNIT_TEST_DEBUG
 	kunit_hexdump_compare_page(test, ctx->umem, direct);
 #endif
 	KUNIT_ASSERT_EQ(test, ret, len);
+	KUNIT_EXPECT_EQ(test, ppos, ppos0 + len);
 
 #if defined(CONFIG_X86) && defined(CONFIG_STRICT_DEVMEM)
 	kunit_info(test, "Expect zeros\n");
@@ -332,7 +342,9 @@ static void read_mem_less_page(struct kunit *test)
 	struct mem_test_ctx *ctx = test->priv;
 	char *buf = kunit_kmalloc(test, PAGE_SIZE, GFP_KERNEL);
 	phys_addr_t pa = virt_to_phys(buf);
-	loff_t pos = pa;
+	size_t len = PAGE_SIZE / 2;
+	loff_t ppos = pa;
+	loff_t ppos0 = ppos;
 	int ret;
 
 #if defined(CONFIG_X86) && defined(CONFIG_STRICT_DEVMEM)
@@ -342,17 +354,20 @@ static void read_mem_less_page(struct kunit *test)
 	}
 #endif
 
-	memset(buf, 0xaa, PAGE_SIZE / 2);
+	memset(buf, 0xaa, len);
 
-	ret = read_mem(&fake_file, ctx->umem, PAGE_SIZE / 2, &pos);
+	ret = read_mem(&fake_file, ctx->umem, len, &ppos);
 
 #if defined(CONFIG_STRICT_DEVMEM)
 	kunit_info(test, "expected error or in some not impossible cases \n");
 	KUNIT_ASSERT_EQ(test, ret, -EPERM);
+	KUNIT_EXPECT_EQ(test, ppos, ppos0);
 #else
 	kunit_info(test, "expected read success\n");
-	KUNIT_ASSERT_EQ(test, ret, PAGE_SIZE / 2);
-	KUNIT_EXPECT_MEMEQ(test, ctx->umem, buf, PAGE_SIZE / 2);
+	KUNIT_ASSERT_EQ(test, ret, len);
+	KUNIT_EXPECT_MEMEQ(test, ctx->umem, buf, len);
+	KUNIT_EXPECT_EQ(test, ppos, ppos0 + len);
+
 #endif
 }
 
@@ -374,7 +389,8 @@ static void read_mem_2_pages(struct kunit *test)
 	struct mem_test_ctx *ctx = test->priv;
 	char *buf = kunit_kmalloc(test, 2 * PAGE_SIZE, GFP_KERNEL);
 	phys_addr_t pa = virt_to_phys(buf);
-	loff_t pos = pa;
+	loff_t ppos = pa;
+	loff_t ppos0 = ppos;
 	int ret;
 
 #if defined(CONFIG_X86) && defined(CONFIG_STRICT_DEVMEM)
@@ -387,15 +403,17 @@ static void read_mem_2_pages(struct kunit *test)
 	memset(buf, 0xaa, PAGE_SIZE);
 	memset(buf + PAGE_SIZE, 0xbb, PAGE_SIZE);
 
-	ret = read_mem(&fake_file, ctx->umem, 2 * PAGE_SIZE, &pos);
+	ret = read_mem(&fake_file, ctx->umem, 2 * PAGE_SIZE, &ppos);
 	kunit_info(test, "read_mem read %d\n", ret);
 
 #if defined(CONFIG_STRICT_DEVMEM)
 	kunit_info(test, "expected error\n");
 	KUNIT_ASSERT_EQ(test, ret, -EPERM);
+	KUNIT_EXPECT_EQ(test, ppos, ppos0);
 #else
 	kunit_info(test, "expected read\n");
 	KUNIT_ASSERT_EQ(test, ret, 2 * PAGE_SIZE);
+	KUNIT_EXPECT_EQ(test, ppos, ppos0 + 2 * PAGE_SIZE);
 
 	KUNIT_EXPECT_MEMEQ(test, ctx->umem, buf, 2 * PAGE_SIZE);
 #endif
@@ -417,18 +435,20 @@ static void read_mem_zero_count_test(struct kunit *test)
 {
 	struct mem_test_ctx *ctx = test->priv;
 	struct file fake_file = { };
-	loff_t pos = 0;
+	loff_t ppos = 0;
+	loff_t ppos0 = ppos;
 	ssize_t ret;
 
-	ret = read_mem(&fake_file, ctx->umem, 0, &pos);
+	ret = read_mem(&fake_file, ctx->umem, 0, &ppos);
 
-	KUNIT_EXPECT_EQ(test, pos, (loff_t)0);
+	KUNIT_EXPECT_EQ(test, ppos, (loff_t)0);
 
 	// valid_phys_addr_range() in not meant to be called with count 0
 	// this should be validated before calling it.
 	// in x86 it acts strangely: addr + count - 1 <= __pa(high_memory - 1)
 	// test should accept also -EFAULT
 	KUNIT_EXPECT_TRUE(test, ret == 0 || ret == -EFAULT);
+	KUNIT_EXPECT_EQ(test, ppos, ppos0);
 }
 
 /**
@@ -512,6 +532,83 @@ static void read_mem_invalid_phys_range_test(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, pos, pos0);
 }
 
+/**
+ * read_mem_unaligned_multi_read_cross_page_test - Multi-read across page boundary with unaligned ppos
+ * @test: KUnit test context.
+ *
+ * Allocates a two-page kmalloc-backed buffer and fills it with a deterministic
+ * byte pattern. Then performs multiple read_mem() calls:
+ *  - starting from a non-page-aligned physical address (unaligned ppos),
+ *  - reading chunks that together cross a page boundary,
+ *  - using separate destination offsets in the userspace-mapped buffer.
+ *
+ * This validates:
+ *  - unaligned physical offsets are handled correctly,
+ *  - page boundary crossing works correctly across multiple calls,
+ *  - data returned matches the backing RAM contents (non-strict devmem),
+ *  - file position (*ppos) advances by the number of bytes returned.
+ *
+ * Under CONFIG_STRICT_DEVMEM, reads from kmalloc-backed System RAM are expected
+ * to be denied or sanitized depending on policy; this test is therefore skipped
+ * in strict mode and is intended for the non-strict profile.
+ */
+static void read_mem_unaligned_multi_read_cross_page_test(struct kunit *test)
+{
+	struct mem_test_ctx *ctx = test->priv;
+	struct file fake_file = { };
+	u8 *buf;
+	size_t buf_len = 2 * PAGE_SIZE;
+	phys_addr_t pa;
+	loff_t ppos, ppos0;
+	ssize_t ret;
+
+	/* Choose an unaligned start close to the end of the first page. */
+	const size_t off = PAGE_SIZE - 13; /* crosses into the second page */
+	const size_t len1 = 17;            /* crosses boundary (13 + 4) */
+	const size_t len2 = 31;            /* continues in second page */
+	const size_t len3 = 29;            /* more, still in second page */
+	const size_t total = len1 + len2 + len3;
+
+#if defined(CONFIG_STRICT_DEVMEM)
+	kunit_skip(test, "strict devmem: kmalloc-backed RAM reads are not expected to succeed");
+	return;
+#endif
+
+	KUNIT_ASSERT_LE(test, total, (size_t)PAGE_SIZE); /* keep it small/simple */
+	KUNIT_ASSERT_LE(test, total, ctx->size);         /* ensure ctx->umem big enough */
+
+	buf = kunit_kmalloc(test, buf_len, GFP_KERNEL);
+	KUNIT_ASSERT_NOT_NULL(test, buf);
+
+	/* Fill with deterministic pattern: buf[i] = (i * 7 + 3) mod 256 */
+	for (size_t i = 0; i < buf_len; i++)
+		buf[i] = (u8)(i * 7 + 3);
+
+	pa = virt_to_phys(buf);
+	ppos = (loff_t)(pa + off);
+	ppos0 = ppos;
+
+	/* 1st read: crosses page boundary with unaligned ppos */
+	ret = read_mem(&fake_file, (char __user *)ctx->umem, len1, &ppos);
+	KUNIT_ASSERT_EQ(test, ret, (ssize_t)len1);
+	KUNIT_EXPECT_EQ(test, ppos, ppos0 + ret);
+
+	/* 2nd read: continues at new ppos, into second page */
+	ppos0 = ppos;
+	ret = read_mem(&fake_file, (char __user *)(ctx->umem + len1), len2, &ppos);
+	KUNIT_ASSERT_EQ(test, ret, (ssize_t)len2);
+	KUNIT_EXPECT_EQ(test, ppos, ppos0 + ret);
+
+	/* 3rd read: another chunk, still unaligned and contiguous */
+	ppos0 = ppos;
+	ret = read_mem(&fake_file, (char __user *)(ctx->umem + len1 + len2), len3, &ppos);
+	KUNIT_ASSERT_EQ(test, ret, (ssize_t)len3);
+	KUNIT_EXPECT_EQ(test, ppos, ppos0 + ret);
+
+	/* Verify full concatenated data matches the source buffer slice */
+	KUNIT_EXPECT_MEMEQ(test, ctx->umem, buf + off, total);
+}
+
 static struct kunit_case mem_cases[] = {
 	KUNIT_CASE_PARAM(read_mem_invalid_offset_test, NULL),
 	KUNIT_CASE_PARAM(read_mem_valid_basic_test, NULL),
@@ -523,6 +620,7 @@ static struct kunit_case mem_cases[] = {
 #endif
 	KUNIT_CASE_PARAM(read_mem_less_page, NULL),
 	KUNIT_CASE_PARAM(read_mem_2_pages, NULL),
+	KUNIT_CASE_PARAM(read_mem_unaligned_multi_read_cross_page_test, NULL),
 	{}
 };
 
