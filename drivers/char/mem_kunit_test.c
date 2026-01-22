@@ -119,18 +119,15 @@ struct pick_ctx {
 
 /**
  * struct mem_test_ctx - Per-test memory context
- * @kmem: Kernel-allocated buffer used for RAM-backed tests.
  * @umem: Userspace-mapped buffer used as the read_mem() destination.
  * @size: Size of the allocated buffers.
  *
  * This structure holds all per-test state shared across test cases.
  * It is initialized in mem_test_init() and stored in test->priv.
  *
- * The @umem buffer is used as the destination for read_mem(), while
- * @kmem is used to provide backing memory for System RAM tests.
+ * The @umem buffer is used as the destination for read_mem().
  */
 struct mem_test_ctx {
-	char *kmem;
 	char __user *umem;
 	size_t size;
 };
@@ -392,7 +389,6 @@ static phys_addr_t pick_invalid_phys_addr(struct kunit *test, size_t count)
 static phys_addr_t pick_phys_addr_type(struct kunit *test, size_t count,
 				       enum phys_addr_type t, void **ram_buf)
 {
-	phys_addr_t end;
 	void *buf;
 	struct pick_ctx ctx = {
 		.count = count,
@@ -468,8 +464,6 @@ static int mem_test_init(struct kunit *test)
 	KUNIT_ASSERT_NOT_NULL(test, ctx);
 	test->priv = ctx;
 	ctx->size = PAGE_SIZE * 4;
-	ctx->kmem = kunit_kmalloc(test, ctx->size, GFP_KERNEL);
-	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, ctx->kmem);
 
 	user_addr = kunit_vm_mmap(test, NULL, 0, ctx->size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_ANONYMOUS | MAP_PRIVATE, 0);
 	KUNIT_ASSERT_NE_MSG(test, user_addr, 0, "Could not create userspace mm");
