@@ -663,6 +663,9 @@ static void read_mem_action(struct kunit *test, struct mem_test_ctx *ctx,
  * Ensures that read_mem() correctly rejects physical addresses that
  * fall outside valid_phys_addr_range(), returning -EFAULT and leaving
  * the file position unchanged.
+ * Testable requirements:
+ * [read_mem.1]
+ * [read_mem.4]
  */
 static void read_mem_invalid_addr_test(struct kunit *test)
 {
@@ -698,6 +701,9 @@ static void read_mem_invalid_addr_test(struct kunit *test)
  *  - read succeeds
  *  - data is sanitized (zero-filled)
  *  - ppos is advanced
+ * Testable requirements:
+ * [read_mem.3]
+ * [read_mem.4]
  */
 static void read_mem_restricted_addr_single_test(struct kunit *test)
 {
@@ -740,6 +746,10 @@ static void read_mem_restricted_addr_single_test(struct kunit *test)
  * Expected behavior:
  *  - CONFIG_STRICT_DEVMEM: access denied (-EPERM)
  *  - otherwise: read succeeds and data matches backing memory
+ * Testable requirements:
+ * [read_mem.2]
+ * [read_mem.3]
+ * [read_mem.4]
  */
 static void read_mem_ram_addr_single_test(struct kunit *test)
 {
@@ -785,6 +795,8 @@ static void read_mem_ram_addr_single_test(struct kunit *test)
  * The test uses a RAM-backed physical address and performs a single read
  * operation. The backing memory is seeded so that content verification is
  * possible when access is allowed.
+ * Testable requirements:
+ * [read_mem.4]
  */
 static void read_mem_ram_addr_single_edge_test(struct kunit *test)
 {
@@ -831,6 +843,8 @@ static void read_mem_ram_addr_single_edge_test(struct kunit *test)
  *
  *   - read_mem() returns -EFAULT
  *   - the file position (*ppos) is not advanced
+ * Testable requirements:
+ * [read_mem.4]
  */
 static void read_mem_ram_addr_single_invalid_user_test(struct kunit *test)
 {
@@ -871,6 +885,10 @@ static void read_mem_ram_addr_single_invalid_user_test(struct kunit *test)
  *  - correct ppos advancement
  *  - correct multi-read sequencing
  *  - correct data returned for non-strict configurations
+ * Testable requirements:
+ * [read_mem.2]
+ * [read_mem.3]
+ * [read_mem.4]
  */
 static void read_mem_cross_page_multi_test(struct kunit *test)
 {
@@ -1005,6 +1023,8 @@ static void read_mem_io_claimed_addr_single_test(struct kunit *test)
  * The test verifies that:
  *  - no memory is modified
  *  - file position is not advanced
+ * Testable requirements:
+ * [read_mem.1]
  */
 static void read_mem_zero_count_test(struct kunit *test)
 {
