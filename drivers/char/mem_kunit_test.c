@@ -775,7 +775,16 @@ static void read_mem_ram_addr_single_test(struct kunit *test)
 }
 
 /**
- * read_mem_ram_addr_single_edge_test
+ * read_mem_ram_addr_single_edge_test - Read across a RAM edge with policy enforcement
+ * @test: KUnit test context.
+ *
+ * This test verifies read_mem() behavior when accessing a System RAM address
+ * that lies at a policy boundary (“edge case”), where access permissions may
+ * change across pages.
+ *
+ * The test uses a RAM-backed physical address and performs a single read
+ * operation. The backing memory is seeded so that content verification is
+ * possible when access is allowed.
  */
 static void read_mem_ram_addr_single_edge_test(struct kunit *test)
 {
