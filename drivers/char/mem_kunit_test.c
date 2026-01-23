@@ -39,6 +39,7 @@ enum phys_addr_type {
  * struct read_request - Description of a read_mem() test operation
  * @phys_addr_type: Physical address category to test (RAM, IO, invalid, etc.).
  * @count: Total number of bytes to read.
+ * @invalid_user: Creates an invalid userspace address as destination.
  * @read_operations_cnt: Number of read_mem() calls to perform.
  * @split_evenly: If true, @count is split across multiple reads.
  * @start_offset: Offset added to the base physical address before reading.
@@ -52,6 +53,7 @@ enum phys_addr_type {
 struct read_request {
 	enum phys_addr_type phys_addr_type;
 	size_t count;
+	bool invalid_user;
 	int read_operations_cnt;
 	bool split_evenly;
 	size_t start_offset;
@@ -499,7 +501,9 @@ static void read_mem_action(struct kunit *test, struct mem_test_ctx *ctx,
 	int i, n;
 	loff_t pos;
 	ssize_t ret;
+	char __user *user_buffer = ctx->umem;
 
+	if (r->invalid_user) user_buffer = (char __user *) 1;
 	memset(res, 0, sizeof(*res));
 	res->skipped = false;
 
@@ -573,7 +577,7 @@ static void read_mem_action(struct kunit *test, struct mem_test_ctx *ctx,
 		}
 
 		ret = read_mem(&fake_file,
-			       (char __user *)(ctx->umem + (size_t)(res->pos_before[i] - res->start_pos)),
+			       (char __user *)(user_buffer + (size_t)(res->pos_before[i] - res->start_pos)),
 			       this_cnt,
 			       &pos);
 
@@ -610,6 +614,7 @@ static void read_mem_invalid_addr_test(struct kunit *test)
 	struct read_request req = {
 		.phys_addr_type = PHYS_INVALID,
 		.count = 64,
+		.invalid_user = false,
 		.read_operations_cnt = 1,
 		.start_offset = 0,
 		.seed_ram = false,
@@ -644,6 +649,7 @@ static void read_mem_restricted_addr_single_test(struct kunit *test)
 	struct read_request req = {
 		.phys_addr_type = PHYS_RESTRICTED,
 		.count = 64,
+		.invalid_user = false,
 		.read_operations_cnt = 1,
 		.start_offset = 0,
 		.seed_ram = true,
@@ -685,6 +691,7 @@ static void read_mem_ram_addr_single_test(struct kunit *test)
 	struct read_request req = {
 		.phys_addr_type = PHYS_SYSTEM_RAM,
 		.count = 64,
+		.invalid_user = false,
 		.read_operations_cnt = 1,
 		.start_offset = 0,
 		.seed_ram = true,
@@ -712,6 +719,44 @@ static void read_mem_ram_addr_single_test(struct kunit *test)
 }
 
 /**
+ * read_mem_ram_addr_single_invalid_user_test - Reject read when user buffer is invalid
+ * @test: KUnit test context.
+ *
+ * Verifies that read_mem() correctly returns -EFAULT when the destination
+ * user-space buffer is invalid, even if the physical address itself is valid.
+ *
+ * The test uses a valid System RAM physical address, but forces an invalid
+ * user-space destination pointer. The expected behavior is:
+ *
+ *   - read_mem() returns -EFAULT
+ *   - the file position (*ppos) is not advanced
+ */
+static void read_mem_ram_addr_single_invalid_user_test(struct kunit *test)
+{
+	struct mem_test_ctx *ctx = test->priv;
+	struct read_request req = {
+		.phys_addr_type = PHYS_SYSTEM_RAM,
+		.count = 64,
+		.invalid_user = true,
+		.read_operations_cnt = 1,
+		.start_offset = 0,
+		.seed_ram = true,
+		.seed_pattern = 0xaa,
+	};
+	struct read_results res;
+
+	read_mem_action(test, ctx, &req, &res);
+
+	if (res.skipped) {
+		kunit_skip(test, "Skip reason:%s\n", res.skipped_reason);
+		return;
+	}
+
+	KUNIT_EXPECT_EQ(test, res.ret_value[0], -EFAULT);
+	KUNIT_EXPECT_EQ(test, res.pos_after[0], res.pos_before[0]);
+}
+
+/**
  * read_mem_cross_page_multi_test - Read across page boundary
  * @test: KUnit test context.
  *
@@ -729,6 +774,7 @@ static void read_mem_cross_page_multi_test(struct kunit *test)
 	struct read_request req = {
 		.phys_addr_type = PHYS_SYSTEM_RAM,
 		.count = PAGE_SIZE,
+		.invalid_user = false,
 		.read_operations_cnt = 4,
 		.split_evenly = true,
 		.start_offset = 16,
@@ -787,6 +833,7 @@ static void read_mem_io_free_addr_single_test(struct kunit *test)
 	struct read_request req = {
 		.phys_addr_type = PHYS_IO_FREE,
 		.count = 1,
+		.invalid_user = false,
 		.read_operations_cnt = 1,
 		.start_offset = 0,
 		.seed_ram = false,
@@ -817,6 +864,7 @@ static void read_mem_io_claimed_addr_single_test(struct kunit *test)
 	struct read_request req = {
 		.phys_addr_type = PHYS_IO_CLAIMED,
 		.count = 1,
+		.invalid_user = false,
 		.read_operations_cnt = 1,
 		.start_offset = 0,
 		.seed_ram = false,
@@ -876,6 +924,7 @@ static struct kunit_case mem_cases[] = {
 	KUNIT_CASE(read_mem_restricted_addr_single_test),
 	KUNIT_CASE(read_mem_ram_addr_single_test),
 	KUNIT_CASE(read_mem_cross_page_multi_test),
+	KUNIT_CASE(read_mem_ram_addr_single_invalid_user_test),
 #ifdef CONFIG_DEVMEM_KUNIT_TEST_IO
 	KUNIT_CASE(read_mem_io_free_addr_single_test),
 	KUNIT_CASE(read_mem_io_claimed_addr_single_test),
