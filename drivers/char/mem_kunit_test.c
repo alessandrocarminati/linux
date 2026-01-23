@@ -775,6 +775,42 @@ static void read_mem_ram_addr_single_test(struct kunit *test)
 }
 
 /**
+ * read_mem_ram_addr_single_edge_test
+ */
+static void read_mem_ram_addr_single_edge_test(struct kunit *test)
+{
+	struct mem_test_ctx *ctx = test->priv;
+	struct read_request req = {
+		.phys_addr_type = PHYS_SYSTEM_RAM,
+		.count = 64,
+		.invalid_user = false,
+		.read_operations_cnt = 1,
+		.start_offset = 0,
+		.seed_ram = true,
+		.seed_pattern = 0xaa,
+	};
+	struct read_results res;
+
+	read_mem_action(test, ctx, &req, &res);
+
+	if (res.skipped) {
+		kunit_skip(test, "Skip reason:%s\n", res.skipped_reason);
+		return;
+	}
+
+#if defined(CONFIG_STRICT_DEVMEM)
+	kunit_info(test, "\"CONFIG_STRICT_DEVMEM=y\" case, expected to fail\n");
+	KUNIT_EXPECT_EQ(test, res.ret_value[0], -EPERM);
+	KUNIT_EXPECT_EQ(test, res.pos_after[0], res.pos_before[0]);
+#else
+	kunit_info(test, "\"# CONFIG_STRICT_DEVMEM is not set\" case, expected to match the memory contents\n");
+	KUNIT_EXPECT_EQ(test, res.ret_value[0], -EPERM);
+	KUNIT_EXPECT_EQ(test, res.pos_after[0], res.pos_before[0] + req.count);
+	KUNIT_EXPECT_MEMEQ(test, ctx->umem, (u8 *)res.backing_kbuf, req.count);
+#endif
+}
+
+/**
  * read_mem_ram_addr_single_invalid_user_test - Reject read when user buffer is invalid
  * @test: KUnit test context.
  *
@@ -984,6 +1020,7 @@ static struct kunit_case mem_cases[] = {
 	KUNIT_CASE(read_mem_ram_addr_single_test),
 	KUNIT_CASE(read_mem_cross_page_multi_test),
 	KUNIT_CASE(read_mem_ram_addr_single_invalid_user_test),
+	KUNIT_CASE(read_mem_ram_addr_single_edge_test),
 #ifdef CONFIG_DEVMEM_KUNIT_TEST_IO
 	KUNIT_CASE(read_mem_io_free_addr_single_test),
 	KUNIT_CASE(read_mem_io_claimed_addr_single_test),
