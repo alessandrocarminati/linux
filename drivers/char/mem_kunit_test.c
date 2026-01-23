@@ -825,7 +825,7 @@ static void read_mem_ram_addr_single_edge_test(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, res.pos_after[0], res.pos_before[0]);
 #else
 	kunit_info(test, "\"# CONFIG_STRICT_DEVMEM is not set\" case, expected to match the memory contents\n");
-	KUNIT_EXPECT_EQ(test, res.ret_value[0], -EPERM);
+	KUNIT_EXPECT_EQ(test, res.ret_value[0], req.count);
 	KUNIT_EXPECT_EQ(test, res.pos_after[0], res.pos_before[0] + req.count);
 	KUNIT_EXPECT_MEMEQ(test, ctx->umem, (u8 *)res.backing_kbuf, req.count);
 #endif
