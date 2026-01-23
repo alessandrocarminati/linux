@@ -1,6 +1,8 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+// SPDX-License-Identifier: GPL-2.0
 /*
- * TODO: comment
+ * DEVMEM kunit test
+ *
+ * Copyright 2026 Red Hat Inc Alessandro Carminati <acarmina@redhat.com>
  */
 
 #include <kunit/test.h>
@@ -14,14 +16,21 @@
 #include "mem.h"
 
 #define MAX_READ 8
-
+#define READ_SMALL 64
+//#define MEM_KUNIT_TEST_DEBUG
 /**
  * enum phys_addr_type - Categories of physical address ranges for /dev/mem policy tests
- * @PHYS_INVALID:     A range guaranteed to fail valid_phys_addr_range().
- * @PHYS_SYSTEM_RAM:  A physical address backed by System RAM (kmalloc-backed page).
- * @PHYS_IO_FREE:     A non-System-RAM IORESOURCE_MEM range which is not busy/claimed.
- * @PHYS_IO_CLAIMED:  A non-System-RAM IORESOURCE_MEM range which is busy/claimed.
- * @PHYS_RESTRICTED:  System RAM marked as reserved for DEVMEM.
+ * @PHYS_INVALID: A range guaranteed to fail valid_phys_addr_range().
+ * @PHYS_SYSTEM_RAM: A physical address backed by System RAM (kmalloc-backed page).
+ * @PHYS_IO_FREE: A non-System-RAM IORESOURCE_MEM range which is not busy/claimed.
+ * @PHYS_IO_CLAIMED: A non-System-RAM IORESOURCE_MEM range which is busy/claimed.
+ * @PHYS_RESTRICTED: System RAM marked as reserved for DEVMEM.
+ * @PHYS_EDGE_ALLOWED_RESTRICTED: System RAM at edge of resetricted zone.
+ * @PHYS_EDGE_RESTRICTED_ALLOWED: Resetricted zone at edge of system RAM.
+ * @PHYS_EDGE_ALLOWED_DENIED: System RAM at edge of denied zone.
+ * @PHYS_EDGE_DENIED_ALLOWED: Denied zone at edge of system RAM.
+ * @PHYS_EDGE_RESTRICTED_DENIED: Resetricted zone at edge of denied zone.
+ * @PHYS_EDGE_DENIED_RESTRICTED: Denied zone at edge of resetricted zone.
  *
  * These categories map to the two policy gates relevant to /dev/mem:
  *  - CONFIG_STRICT_DEVMEM (Gate 1): blocks System RAM.
@@ -33,7 +42,20 @@ enum phys_addr_type {
 	PHYS_IO_FREE,
 	PHYS_IO_CLAIMED,
 	PHYS_RESTRICTED,
-	PHYS_EDGE_MEM,
+	PHYS_EDGE_ALLOWED_RESTRICTED,
+	PHYS_EDGE_RESTRICTED_ALLOWED,
+	PHYS_EDGE_ALLOWED_DENIED,
+	PHYS_EDGE_DENIED_ALLOWED,
+	PHYS_EDGE_RESTRICTED_DENIED,
+	PHYS_EDGE_DENIED_RESTRICTED,
+};
+
+enum compare_type {
+	COMP_NOTHING = 0,
+	COMP_COPY_ZERO,
+	COMP_ZERO_COPY,
+	COMP_HALF_COPY,
+	COMP_HALF_ZERO,
 };
 
 /**
@@ -112,7 +134,7 @@ struct read_results {
  * walk_iomem_res_desc() traversal.
  */
 struct pick_ctx {
-	struct kunit *test; // debug
+	struct kunit *test;
 	size_t count;
 	phys_addr_t found;
 	unsigned long found_flags;
@@ -135,94 +157,165 @@ struct mem_test_ctx {
 	size_t size;
 };
 
+#if defined(CONFIG_IO_STRICT_DEVMEM)
+struct expected_res {
+	size_t ret;
+	loff_t offs_add;
+	enum compare_type c;
+};
+
+struct edge_test_case {
+	const char *name;
+	struct read_request req;
+	struct expected_res res;
+};
+
+static const struct edge_test_case edge_cases[] = {
+	{
+	  .name = "EDGE_ALLOWED_RESTRICTED",
+	  .req = {
+		  .phys_addr_type = PHYS_EDGE_ALLOWED_RESTRICTED,
+		  .count = READ_SMALL,
+		  .read_operations_cnt = 1
+		},
+	  .res = {
+		  .ret = READ_SMALL,
+		  .offs_add = READ_SMALL,
+		  .c = COMP_COPY_ZERO
+		}
+	},
+	{
+	  .name = "EDGE_RESTRICTED_ALLOWED",
+	  .req = {
+		  .phys_addr_type = PHYS_EDGE_RESTRICTED_ALLOWED,
+		  .count = READ_SMALL,
+		  .read_operations_cnt = 1
+		},
+	  .res = {
+		  .ret = READ_SMALL,
+		  .offs_add = READ_SMALL,
+		  .c = COMP_ZERO_COPY
+		}
+	},
+	{
+	  .name = "EDGE_ALLOWED_DENIED",
+	  .req = {
+		  .phys_addr_type = PHYS_EDGE_ALLOWED_DENIED,
+		  .count = READ_SMALL,
+		  .read_operations_cnt = 1
+		},
+	  .res = {
+		  .ret = -EPERM,
+		  .offs_add = READ_SMALL / 2,
+		  .c = COMP_HALF_COPY
+		}
+	},
+	{
+	  .name = "EDGE_DENIED_ALLOWED",
+	  .req = {
+		  .phys_addr_type = PHYS_EDGE_DENIED_ALLOWED,
+		  .count = READ_SMALL,
+		  .read_operations_cnt = 1
+		},
+	  .res = {
+		  .ret = -EPERM,
+		  .offs_add = 0,
+		  .c = COMP_NOTHING
+		}
+	},
+	{
+	  .name = "EDGE_RESTRICTED_DENIED",
+	  .req = {
+		  .phys_addr_type = PHYS_EDGE_RESTRICTED_DENIED,
+		  .count = READ_SMALL,
+		  .read_operations_cnt = 1
+		},
+	  .res = {
+		  .ret = -EPERM,
+		  .offs_add = READ_SMALL / 2,
+		  .c = COMP_HALF_ZERO
+		}
+	},
+	{
+	  .name = "EDGE_DENIED_RESTRICTED",
+	  .req = {
+		  .phys_addr_type = PHYS_EDGE_DENIED_RESTRICTED,
+		  .count = READ_SMALL,
+		  .read_operations_cnt = 1
+		},
+	  .res = {
+		  .ret = -EPERM,
+		  .offs_add = 0,
+		   .c = COMP_NOTHING
+		}
+	},
+};
+
+static void edge_test_case_get_desc(const struct edge_test_case *test_case,
+				      char *desc)
+{
+	strscpy(desc, test_case->name, KUNIT_PARAM_DESC_SIZE);
+}
+KUNIT_ARRAY_PARAM(edge_test_case, edge_cases, edge_test_case_get_desc);
+#endif
 /**
  * phys_addr_type_str - Convert a phys_addr_type enum to a printable string
  * @t: Physical address type.
  *
  * Returns a constant string describing the given physical address category.
  */
-static char *phys_addr_type_str(enum phys_addr_type t) {
-	switch (t) {
-		case PHYS_INVALID:
-			return "PHYS_INVALID";
-	        case PHYS_SYSTEM_RAM:
-			return "PHYS_SYSTEM_RAM";
-		case PHYS_IO_FREE:
-			return "PHYS_IO_FREE";
-		case PHYS_IO_CLAIMED:
-			return "PHYS_IO_CLAIMED";
-		case PHYS_RESTRICTED:
-			return "PHYS_RESTRICTED";
-		case PHYS_EDGE_MEM:
-			return "PHYS_EDGE_MEM";
-		default:
-			return "UNKNOWN";
-	}
-}
-
-#ifdef MEM_KUNIT_TEST_DEBUG
-/**
- * kunit_hexdump_page - Emit a PAGE_SIZE hexdump to the KUnit log
- * @test: KUnit test context.
- * @addr: Start address of the page to dump.
- *
- * Debug helper to print a page-sized buffer as 16-byte rows to the KUnit log
- * via kunit_info(). Intended for diagnosing unexpected read_mem() results.
- *
- * Not used in normal passing runs (calls are currently commented-out in tests).
- */
-static void kunit_hexdump_page(struct kunit *test, const void *addr)
+static char *phys_addr_type_str(enum phys_addr_type t)
 {
-	const u8 *p = addr;
-	size_t offset = 0;
-
-	for (offset = 0; offset < PAGE_SIZE; offset += 16) {
-		char line[80];
-		int pos = 0;
-		int i;
-
-		pos += scnprintf(line + pos, sizeof(line) - pos,
-				 "%08zx: ", offset);
-
-		for (i = 0; i < 16; i++) {
-			pos += scnprintf(line + pos, sizeof(line) - pos,
-					 "%02x ", p[offset + i]);
-		}
-
-		pos += scnprintf(line + pos, sizeof(line) - pos, " |");
-
-		for (i = 0; i < 16; i++) {
-			u8 c = p[offset + i];
-			pos += scnprintf(line + pos, sizeof(line) - pos,
-					 "%c", ((c>31) && (c<127)) ? c : '.');
-		}
-
-		pos += scnprintf(line + pos, sizeof(line) - pos, "|");
-
-		kunit_info(test, "%s\n", line);
+	switch (t) {
+	case PHYS_INVALID:
+		return "PHYS_INVALID";
+	case PHYS_SYSTEM_RAM:
+		return "PHYS_SYSTEM_RAM";
+	case PHYS_IO_FREE:
+		return "PHYS_IO_FREE";
+	case PHYS_IO_CLAIMED:
+		return "PHYS_IO_CLAIMED";
+	case PHYS_RESTRICTED:
+		return "PHYS_RESTRICTED";
+	case PHYS_EDGE_ALLOWED_RESTRICTED:
+		return "PHYS_EDGE_ALLOWED_RESTRICTED";
+	case PHYS_EDGE_RESTRICTED_ALLOWED:
+		return "PHYS_EDGE_RESTRICTED_ALLOWED";
+	case PHYS_EDGE_ALLOWED_DENIED:
+		return "PHYS_EDGE_ALLOWED_DENIED";
+	case PHYS_EDGE_DENIED_ALLOWED:
+		return "PHYS_EDGE_DENIED_ALLOWED";
+	case PHYS_EDGE_RESTRICTED_DENIED:
+		return "PHYS_EDGE_RESTRICTED_DENIED";
+	case PHYS_EDGE_DENIED_RESTRICTED:
+		return "PHYS_EDGE_DENIED_RESTRICTED";
+	default:
+		return "UNKNOWN";
 	}
 }
 
 /**
- * kunit_hexdump_compare_page - Emit a side-by-side hexdump of two pages
+ * kunit_hexdump_compare - Emit a side-by-side hexdump of two buffers
  * @test: KUnit test context.
- * @a: First buffer (page) to dump.
- * @b: Second buffer (page) to dump.
+ * @a:    First buffer (page) to dump.
+ * @b:    Second buffer (page) to dump.
+ * @cnt:  Size of the buffer to compare (must be multiple of 16).
  *
  * Debug helper to print 16-byte rows of @a and @b on the same line for quick
  * visual comparison when KUNIT_EXPECT_MEM(E)Q checks fail.
  *
  * Not used in normal passing runs (calls are currently commented-out in tests).
  */
-static void kunit_hexdump_compare_page(struct kunit *test,
+static void kunit_hexdump_compare(struct kunit *test,
 				       const void *a,
-				       const void *b)
+				       const void *b, size_t cnt)
 {
+#ifdef MEM_KUNIT_TEST_DEBUG
 	const u8 *pa = a;
 	const u8 *pb = b;
 	size_t offset;
 
-	for (offset = 0; offset < PAGE_SIZE; offset += 16) {
+	for (offset = 0; offset < cnt; offset += 16) {
 		char line[160];
 		int pos = 0;
 		int i;
@@ -242,8 +335,8 @@ static void kunit_hexdump_compare_page(struct kunit *test,
 
 		kunit_info(test, "%s\n", line);
 	}
-}
 #endif
+}
 
 /**
  * pick_restricted_phys_addr - Find a "restricted" physical address
@@ -265,7 +358,7 @@ static phys_addr_t pick_restricted_phys_addr(struct kunit *test, size_t count)
 #else
 	phys_addr_t p;
 	const phys_addr_t start = 0;
-	const phys_addr_t end = SZ_1M;
+	const phys_addr_t end = SZ_2M;
 	const phys_addr_t step = PAGE_SIZE;
 
 	if (count == 0)
@@ -287,54 +380,121 @@ static phys_addr_t pick_restricted_phys_addr(struct kunit *test, size_t count)
 #endif
 }
 
-/**
- * pick_mixed_policy_phys_addr - Find a range spanning restricted -> denied pages
- * @test: KUnit test context.
- * @count: Number of bytes to read.
- *
- * Finds a physical address such that:
- *   - the first page is "restricted" (page_is_allowed() == 2)
- *   - the next page is "denied"     (page_is_allowed() == 0)
- *
- * Returns:
- *   Physical address suitable for a mixed-policy read, or 0 if none found.
- */
-static phys_addr_t pick_mixed_policy_phys_addr(struct kunit *test, size_t count)
+static inline int edge_to_allowed_pair(enum phys_addr_type t, int *a, int *b)
 {
-#if !defined(CONFIG_STRICT_DEVMEM)
-	return 0;
-#else
-	phys_addr_t base;
-	unsigned long pfn;
+	switch (t) {
+	case PHYS_EDGE_ALLOWED_RESTRICTED:
+		*a = 1;
+		*b = 2;
+		return 0;
+	case PHYS_EDGE_RESTRICTED_ALLOWED:
+		*a = 2;
+		*b = 1;
+		return 0;
+	case PHYS_EDGE_ALLOWED_DENIED:
+		*a = 1;
+		*b = 0;
+		return 0;
+	case PHYS_EDGE_DENIED_ALLOWED:
+		*a = 0;
+		*b = 1;
+		return 0;
+	case PHYS_EDGE_RESTRICTED_DENIED:
+		*a = 2;
+		*b = 0;
+		return 0;
+	case PHYS_EDGE_DENIED_RESTRICTED:
+		*a = 0;
+		*b = 2;
+		return 0;
+	default:
+	}
+	return 1;
+}
+
+static inline bool edge_requires_restricted(enum phys_addr_type t)
+{
+	switch (t) {
+	case PHYS_EDGE_ALLOWED_RESTRICTED:
+	case PHYS_EDGE_RESTRICTED_ALLOWED:
+	case PHYS_EDGE_RESTRICTED_DENIED:
+	case PHYS_EDGE_DENIED_RESTRICTED:
+		return true;
+	default:
+	}
+	return false;
+}
+
+/**
+ * pick_mixed_policy_phys_addr - Pick a physical address matching a policy edge
+ * @test: KUnit test context.
+ * @count: Number of bytes to be read (must be >= 2 and <= PAGE_SIZE for edges).
+ * @t: Desired address type (basic or edge).
+ *
+ * It scans PFNs looking for adjacent pages (pfn, pfn+1) whose page_is_allowed()
+ * values match the requested transition and returns a start address positioned
+ * at the last byte of the first page so the access spans the boundary.
+ *
+ * Constraints assumed by this helper:
+ *  - @count is never greater than PAGE_SIZE. With start at
+ *    (PAGE_SIZE - count / 2), this ensures the access spans two pages.
+ *  - If CONFIG_STRICT_DEVMEM is not enabled, edges involving RESTRICTED (2)
+ *    are treated as not present and return 0.
+ *
+ * Return: physical start address, or 0 if none found.
+ */
+static phys_addr_t pick_mixed_policy_phys_addr(struct kunit *test, size_t count,
+					       enum phys_addr_type t)
+{
 	phys_addr_t start;
+	unsigned long pfn;
+	int want_a, want_b;
+	int a, b;
 
-	if (count < 2)
+	if (edge_to_allowed_pair(t, &want_a, &want_b)) {
+		kunit_info(test, "Unsupported edge type %d\n", t);
 		return 0;
-
-	base = pick_restricted_phys_addr(test, PAGE_SIZE);
-	if (!base)
-		return 0;
-
-	pfn = PHYS_PFN(base);
-
-	if (page_is_allowed(pfn + 1) == 0) {
-		start = PFN_PHYS(pfn) + PAGE_SIZE - 1;
-
-		if (valid_phys_addr_range(start, count))
-			return start;
 	}
 
-	if (pfn > 0 && page_is_allowed(pfn - 1) == 0) {
-		start = PFN_PHYS(pfn) - 1;
-
-		if (valid_phys_addr_range(start, count))
-			return start;
+	if (count < 2) {
+		kunit_info(test, "Count=%zu too small for edge type %d\n",
+			   count, t);
+		return 0;
+	}
+	if (count > PAGE_SIZE) {
+		kunit_info(test, "Count=%zu > PAGE_SIZE not supported for edge type %d\n",
+			   count, t);
+		return 0;
 	}
 
-	kunit_info(test,
-		   "pick_mixed_policy_phys_addr: no adjacent denied page found\n");
+	if (!IS_ENABLED(CONFIG_STRICT_DEVMEM) && edge_requires_restricted(t)) {
+		kunit_info(test, "No restricted edges when CONFIG_STRICT_DEVMEM is disabled\n");
+		return 0;
+	}
+
+	for (pfn = 0; pfn + 1 < max_pfn; pfn++) {
+		a = page_is_allowed(pfn);
+		if (a != want_a)
+			continue;
+
+		b = page_is_allowed(pfn + 1);
+		if (b != want_b)
+			continue;
+
+		start = PFN_PHYS(pfn) + PAGE_SIZE - count / 2;
+
+		if (!valid_phys_addr_range(start, count))
+			continue;
+
+		kunit_info(test,
+			   "found edge %d at pfn=%lu (a=%d b=%d) start=0x%llx count=%zu\n",
+			   t, pfn, a, b, (unsigned long long)start, count);
+
+		return start;
+	}
+
+	kunit_info(test, "no match for edge %d found\n", t);
 	return 0;
-#endif
 }
 
 /**
@@ -430,13 +590,7 @@ static phys_addr_t pick_invalid_phys_addr(struct kunit *test, size_t count)
  * @ram_buf: Optional output pointer to backing RAM buffer.
  *
  * Selects a physical address suitable for testing read_mem() based on
- * the requested address category:
- *
- *   PHYS_INVALID      - address rejected by valid_phys_addr_range()
- *   PHYS_SYSTEM_RAM   - kmalloc-backed RAM
- *   PHYS_IO_FREE      - unclaimed MMIO region
- *   PHYS_IO_CLAIMED   - claimed MMIO region
- *   PHYS_RESTRICTED   - address returning sanitized reads
+ * the requested address category.
  *
  * Returns the selected physical address, or 0 if no suitable address
  * exists on the current platform.
@@ -450,7 +604,7 @@ static phys_addr_t pick_phys_addr_type(struct kunit *test, size_t count,
 		.found = 0,
 	};
 
-	kunit_info(test, "%s: count=%zu, type=%s\n", __func__, count, phys_addr_type_str(t));
+	kunit_info(test, "count=%zu, type=%s\n", count, phys_addr_type_str(t));
 
 	if (ram_buf)
 		*ram_buf = NULL;
@@ -469,7 +623,7 @@ static phys_addr_t pick_phys_addr_type(struct kunit *test, size_t count,
 
 		if (count > PAGE_SIZE) {
 			kunit_info(test,
-				   "pick_phys_addr_type: requested %zu > PAGE_SIZE for RAM\n",
+				   "requested %zu > PAGE_SIZE for RAM\n",
 				   count);
 			return 0;
 		}
@@ -493,8 +647,14 @@ static phys_addr_t pick_phys_addr_type(struct kunit *test, size_t count,
 	case PHYS_RESTRICTED:
 		return pick_restricted_phys_addr(test, count);
 
-	case PHYS_EDGE_MEM:
-		return pick_mixed_policy_phys_addr(test, count);
+	case PHYS_EDGE_ALLOWED_RESTRICTED:
+	case PHYS_EDGE_RESTRICTED_ALLOWED:
+	case PHYS_EDGE_ALLOWED_DENIED:
+	case PHYS_EDGE_DENIED_ALLOWED:
+	case PHYS_EDGE_RESTRICTED_DENIED:
+	case PHYS_EDGE_DENIED_RESTRICTED:
+		ctx.found = pick_mixed_policy_phys_addr(test, count, t);
+		return ctx.found;
 
 	default:
 		return 0;
@@ -523,11 +683,22 @@ static int mem_test_init(struct kunit *test)
 	test->priv = ctx;
 	ctx->size = PAGE_SIZE * 4;
 
-	user_addr = kunit_vm_mmap(test, NULL, 0, ctx->size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_ANONYMOUS | MAP_PRIVATE, 0);
-	KUNIT_ASSERT_NE_MSG(test, user_addr, 0, "Could not create userspace mm");
-	KUNIT_ASSERT_LT_MSG(test, user_addr, (unsigned long)TASK_SIZE, "Failed to allocate user memory");
+	user_addr = kunit_vm_mmap(test, NULL, 0, ctx->size,
+		   PROT_READ | PROT_WRITE | PROT_EXEC, MAP_ANONYMOUS | MAP_PRIVATE, 0);
+	KUNIT_ASSERT_NE_MSG(test, user_addr, 0,
+		   "Could not create userspace mm");
+	KUNIT_ASSERT_LT_MSG(test, user_addr, (unsigned long)TASK_SIZE,
+		   "Failed to allocate user memory");
 	ctx->umem = (char __user *)user_addr;
 	return 0;
+}
+
+static inline bool requires_backing_kbuf(enum phys_addr_type t)
+{
+	if (t == PHYS_SYSTEM_RAM)
+		return true;
+
+	return false;
 }
 
 /**
@@ -559,13 +730,15 @@ static void read_mem_action(struct kunit *test, struct mem_test_ctx *ctx,
 	ssize_t ret;
 	char __user *user_buffer = ctx->umem;
 
-	if (r->invalid_user) user_buffer = (char __user *) 1;
+	if (r->invalid_user)
+		user_buffer = (char __user *) 1;
+
 	memset(res, 0, sizeof(*res));
 	res->skipped = false;
 
 	n = r->read_operations_cnt;
 	if ((n > MAX_READ) || (n <= 0)) {
-		kunit_info(test, "read_mem_action: ops=%d > MAX_READ=%d, skipping\n",
+		kunit_info(test, "ops=%d > MAX_READ=%d, skipping\n",
 			   n, MAX_READ);
 		res->skipped = true;
 		res->skipped_reason = "Required operation cnt invalid";
@@ -575,7 +748,7 @@ static void read_mem_action(struct kunit *test, struct mem_test_ctx *ctx,
 	res->base_phys = pick_phys_addr_type(test, max_t(size_t, total, 1),
 					     r->phys_addr_type, &ram_buf);
 	if (!res->base_phys) {
-		kunit_info(test, "read_mem_action: could not pick phys type %s, skipping\n",
+		kunit_info(test, "could not pick phys type %s, skipping\n",
 			   phys_addr_type_str(r->phys_addr_type));
 		res->skipped = true;
 		res->skipped_reason = "Can not find any requested address type";
@@ -585,18 +758,17 @@ static void read_mem_action(struct kunit *test, struct mem_test_ctx *ctx,
 	res->base_phys += r->start_offset;
 
 	if (r->seed_ram) {
-		if (r->phys_addr_type != PHYS_SYSTEM_RAM || !ram_buf) {
-			kunit_info(test, "read_mem_action: seed requested but no RAM backing, skipping seed\n");
-		} else {
+		if (!requires_backing_kbuf(r->phys_addr_type) || !ram_buf)
+			kunit_info(test, "seed requested but no RAM backing, skipping seed\n");
+		else
 			memset(ram_buf, r->seed_pattern, PAGE_SIZE);
-		}
 	}
 
 	if (r->split_evenly && n > 1) {
 		per = total / n;
 		rem = total % n;
 		if (per == 0) {
-			kunit_info(test, "read_mem_action: count=%zu too small for ops=%d, forcing single op\n",
+			kunit_info(test, "count=%zu too small for ops=%d, forcing single op\n",
 				   total, n);
 			n = 1;
 			per = 0;
@@ -608,7 +780,7 @@ static void read_mem_action(struct kunit *test, struct mem_test_ctx *ctx,
 	res->start_pos = pos;
 
 	kunit_info(test,
-		   "read_mem_action: type=%d base_phys=0x%llx start_offset=%zu count=%zu ops=%d\n",
+		   "type=%d base_phys=0x%llx start_offset=%zu count=%zu ops=%d\n",
 		   r->phys_addr_type,
 		   (unsigned long long)res->base_phys,
 		   r->start_offset, total, n);
@@ -616,13 +788,12 @@ static void read_mem_action(struct kunit *test, struct mem_test_ctx *ctx,
 	for (i = 0; i < n; i++) {
 		size_t this_cnt;
 
-		if (n == 1) {
+		if (n == 1)
 			this_cnt = total;
-		} else if (r->split_evenly) {
+		else if (r->split_evenly)
 			this_cnt = per + (i < rem ? 1 : 0);
-		} else {
+		else
 			this_cnt = (i == 0) ? total : 0;
-		}
 
 		res->pos_before[i] = pos;
 
@@ -633,9 +804,11 @@ static void read_mem_action(struct kunit *test, struct mem_test_ctx *ctx,
 		}
 
 		ret = read_mem(&fake_file,
-			       (char __user *)(user_buffer + (size_t)(res->pos_before[i] - res->start_pos)),
-			       this_cnt,
-			       &pos);
+			   (char __user *)(user_buffer +
+			   (size_t)(res->pos_before[i] -
+			   res->start_pos)),
+			   this_cnt,
+			   &pos);
 
 		res->ret_value[i] = ret;
 		res->pos_after[i] = pos;
@@ -650,7 +823,7 @@ static void read_mem_action(struct kunit *test, struct mem_test_ctx *ctx,
 
 	res->end_pos = pos;
 
-	if (r->phys_addr_type == PHYS_SYSTEM_RAM && ram_buf) {
+	if (requires_backing_kbuf(r->phys_addr_type) && ram_buf) {
 		res->backing_kbuf = ram_buf;
 		res->backing_kbuf_sz = PAGE_SIZE;
 	}
@@ -663,6 +836,7 @@ static void read_mem_action(struct kunit *test, struct mem_test_ctx *ctx,
  * Ensures that read_mem() correctly rejects physical addresses that
  * fall outside valid_phys_addr_range(), returning -EFAULT and leaving
  * the file position unchanged.
+ *
  * Testable requirements:
  * [read_mem.1]
  * [read_mem.4]
@@ -672,7 +846,7 @@ static void read_mem_invalid_addr_test(struct kunit *test)
 	struct mem_test_ctx *ctx = test->priv;
 	struct read_request req = {
 		.phys_addr_type = PHYS_INVALID,
-		.count = 64,
+		.count = READ_SMALL,
 		.invalid_user = false,
 		.read_operations_cnt = 1,
 		.start_offset = 0,
@@ -701,6 +875,7 @@ static void read_mem_invalid_addr_test(struct kunit *test)
  *  - read succeeds
  *  - data is sanitized (zero-filled)
  *  - ppos is advanced
+ *
  * Testable requirements:
  * [read_mem.3]
  * [read_mem.4]
@@ -710,7 +885,7 @@ static void read_mem_restricted_addr_single_test(struct kunit *test)
 	struct mem_test_ctx *ctx = test->priv;
 	struct read_request req = {
 		.phys_addr_type = PHYS_RESTRICTED,
-		.count = 64,
+		.count = READ_SMALL,
 		.invalid_user = false,
 		.read_operations_cnt = 1,
 		.start_offset = 0,
@@ -730,10 +905,14 @@ static void read_mem_restricted_addr_single_test(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, res.pos_after[0], res.pos_before[0] + req.count);
 #if defined(CONFIG_STRICT_DEVMEM)
 	kunit_info(test, "\"CONFIG_STRICT_DEVMEM=y\" case, expected to be 0\n");
+	kunit_info(test, "base_phys=%pa, cnt=%ld\n", (u8 *)__va(res.base_phys), req.count);
+	kunit_hexdump_compare(test, ctx->umem, (u8 *)__va(res.base_phys), req.count);
 	KUNIT_EXPECT_TRUE(test, memchr_inv(ctx->umem, 0, req.count) == NULL);
 #else
 	kunit_info(test, "\"# CONFIG_STRICT_DEVMEM is not set\" case, expected to be 0\n");
-	KUNIT_EXPECT_MEMEQ(test, ctx->umem, (u8 *)res.backing_kbuf, req.count);
+	kunit_info(test, "base_phys=%pa, cnt=%ld\n", (u8 *)__va(res.base_phys), req.count);
+	kunit_hexdump_compare(test, ctx->umem, (u8 *)__va(res.base_phys), req.count);
+	KUNIT_EXPECT_MEMEQ(test, ctx->umem, (u8 *)__va(res.base_phys), req.count);
 #endif
 }
 
@@ -746,6 +925,7 @@ static void read_mem_restricted_addr_single_test(struct kunit *test)
  * Expected behavior:
  *  - CONFIG_STRICT_DEVMEM: access denied (-EPERM)
  *  - otherwise: read succeeds and data matches backing memory
+ *
  * Testable requirements:
  * [read_mem.2]
  * [read_mem.3]
@@ -756,7 +936,7 @@ static void read_mem_ram_addr_single_test(struct kunit *test)
 	struct mem_test_ctx *ctx = test->priv;
 	struct read_request req = {
 		.phys_addr_type = PHYS_SYSTEM_RAM,
-		.count = 64,
+		.count = READ_SMALL,
 		.invalid_user = false,
 		.read_operations_cnt = 1,
 		.start_offset = 0,
@@ -774,58 +954,15 @@ static void read_mem_ram_addr_single_test(struct kunit *test)
 
 #if defined(CONFIG_STRICT_DEVMEM)
 	kunit_info(test, "\"CONFIG_STRICT_DEVMEM=y\" case, expected to fail\n");
+	kunit_info(test, "res.backing_kbuf=%p, cnt=%ld\n", (u8 *)res.backing_kbuf, req.count);
+	kunit_hexdump_compare(test, ctx->umem, (u8 *)res.backing_kbuf, req.count);
 	KUNIT_EXPECT_EQ(test, res.ret_value[0], -EPERM);
 	KUNIT_EXPECT_EQ(test, res.pos_after[0], res.pos_before[0]);
 #else
-	kunit_info(test, "\"# CONFIG_STRICT_DEVMEM is not set\" case, expected to match the memory contents\n");
+	kunit_info(test, "\"# CONFIG_STRICT_DEVMEM is not set\" case, expected to match\n");
+	kunit_info(test, "res.backing_kbuf=%p, cnt=%ld\n", (u8 *)res.backing_kbuf, req.count);
+	kunit_hexdump_compare(test, ctx->umem, (u8 *)res.backing_kbuf, req.count);
 	KUNIT_EXPECT_EQ(test, res.ret_value[0], req.count);
-	KUNIT_EXPECT_EQ(test, res.pos_after[0], res.pos_before[0] + req.count);
-	KUNIT_EXPECT_MEMEQ(test, ctx->umem, (u8 *)res.backing_kbuf, req.count);
-#endif
-}
-
-/**
- * read_mem_ram_addr_single_edge_test - Read across a RAM edge with policy enforcement
- * @test: KUnit test context.
- *
- * This test verifies read_mem() behavior when accessing a System RAM address
- * that lies at a policy boundary (“edge case”), where access permissions may
- * change across pages.
- *
- * The test uses a RAM-backed physical address and performs a single read
- * operation. The backing memory is seeded so that content verification is
- * possible when access is allowed.
- * Testable requirements:
- * [read_mem.4]
- */
-static void read_mem_ram_addr_single_edge_test(struct kunit *test)
-{
-	struct mem_test_ctx *ctx = test->priv;
-	struct read_request req = {
-		.phys_addr_type = PHYS_SYSTEM_RAM,
-		.count = 64,
-		.invalid_user = false,
-		.read_operations_cnt = 1,
-		.start_offset = 0,
-		.seed_ram = true,
-		.seed_pattern = 0xaa,
-	};
-	struct read_results res;
-
-	read_mem_action(test, ctx, &req, &res);
-
-	if (res.skipped) {
-		kunit_skip(test, "Skip reason:%s\n", res.skipped_reason);
-		return;
-	}
-
-#if defined(CONFIG_STRICT_DEVMEM)
-	kunit_info(test, "\"CONFIG_STRICT_DEVMEM=y\" case, expected to fail\n");
-	KUNIT_EXPECT_EQ(test, res.ret_value[0], -EPERM);
-	KUNIT_EXPECT_EQ(test, res.pos_after[0], res.pos_before[0]);
-#else
-	kunit_info(test, "\"# CONFIG_STRICT_DEVMEM is not set\" case, expected to match the memory contents\n");
-	KUNIT_EXPECT_EQ(test, res.ret_value[0], -EPERM);
 	KUNIT_EXPECT_EQ(test, res.pos_after[0], res.pos_before[0] + req.count);
 	KUNIT_EXPECT_MEMEQ(test, ctx->umem, (u8 *)res.backing_kbuf, req.count);
 #endif
@@ -843,6 +980,7 @@ static void read_mem_ram_addr_single_edge_test(struct kunit *test)
  *
  *   - read_mem() returns -EFAULT
  *   - the file position (*ppos) is not advanced
+ *
  * Testable requirements:
  * [read_mem.4]
  */
@@ -851,7 +989,7 @@ static void read_mem_ram_addr_single_invalid_user_test(struct kunit *test)
 	struct mem_test_ctx *ctx = test->priv;
 	struct read_request req = {
 		.phys_addr_type = PHYS_SYSTEM_RAM,
-		.count = 64,
+		.count = READ_SMALL,
 		.invalid_user = true,
 		.read_operations_cnt = 1,
 		.start_offset = 0,
@@ -885,6 +1023,7 @@ static void read_mem_ram_addr_single_invalid_user_test(struct kunit *test)
  *  - correct ppos advancement
  *  - correct multi-read sequencing
  *  - correct data returned for non-strict configurations
+ *
  * Testable requirements:
  * [read_mem.2]
  * [read_mem.3]
@@ -922,7 +1061,7 @@ static void read_mem_cross_page_multi_test(struct kunit *test)
 	int i;
 
 	expected_pos = res.start_pos;
-	kunit_info(test, "\"# CONFIG_STRICT_DEVMEM is not set\" case, expected to match the memory contents\n");
+	kunit_info(test, "\"# CONFIG_STRICT_DEVMEM is not set\" case, expected to match\n");
 	for (i = 0; i < req.read_operations_cnt && i < MAX_READ; i++) {
 		ret = res.ret_value[i];
 		if (ret < 0)
@@ -932,9 +1071,112 @@ static void read_mem_cross_page_multi_test(struct kunit *test)
 		expected_pos += ret;
 		KUNIT_EXPECT_EQ(test, res.pos_after[i], expected_pos);
 	}
+	kunit_info(test, "res.backing_kbuf=%p, cnt=%ld\n", (u8 *)res.backing_kbuf, req.count);
+	kunit_hexdump_compare(test, ctx->umem, (u8 *)res.backing_kbuf, req.count);
 	KUNIT_EXPECT_MEMEQ(test, ctx->umem, (u8 *)res.backing_kbuf, req.count);
 #endif
 }
+
+#if defined(CONFIG_IO_STRICT_DEVMEM)
+/**
+ * read_mem_ram_addr_single_edge_test - Validate read_mem() behavior across
+ *                                      mixed per-page policy boundaries
+ * @test: KUnit test context.
+ *
+ * This test verifies read_mem() behavior when a single read spans two
+ * adjacent physical pages that differ in access policy.
+ *
+ * The test validates the following read_mem() requirements:
+ *
+ *   1. Per-page access checks are applied in address order.
+ *   2. Restricted pages return zero-filled data.
+ *   3. Denied pages terminate the read with -EPERM.
+ *   4. Partial reads may occur when a denial happens after some data
+ *      has already been copied.
+ *   5. *ppos is updated only for non failing read operations
+ *
+ * This test is only built when CONFIG_IO_STRICT_DEVMEM is enabled, as
+ * mixed per-page policy behavior is only meaningful under strict devmem
+ * enforcement.
+ *
+ * Testable requirements:
+ * [read_mem.4]
+ */
+static void read_mem_ram_addr_single_edge_test(struct kunit *test)
+{
+	struct mem_test_ctx *ctx = test->priv;
+	const struct edge_test_case *test_case = test->param_value;
+	struct read_results res;
+
+	read_mem_action(test, ctx, &test_case->req, &res);
+
+	if (res.skipped) {
+		kunit_skip(test, "Skip reason:%s\n", res.skipped_reason);
+		return;
+	}
+
+	switch (test_case->res.c) {
+	case COMP_COPY_ZERO:
+		kunit_info(test, "base_phys=%pa, cnt=%ld, r1=%ld, r2=%ld\n",
+			   (u8 *)__va(res.base_phys), test_case->req.count,
+			   res.ret_value[0], res.ret_value[1]);
+		kunit_hexdump_compare(test, ctx->umem, (u8 *)__va(res.base_phys),
+				   test_case->req.count);
+		KUNIT_EXPECT_EQ(test, res.ret_value[0], test_case->res.ret);
+		KUNIT_EXPECT_EQ(test, res.pos_after[0], res.pos_before[0] + test_case->req.count);
+		KUNIT_EXPECT_MEMEQ(test, ctx->umem, (u8 *)__va(res.base_phys),
+				   res.ret_value[0] / 2);
+		KUNIT_EXPECT_TRUE(test, memchr_inv(ctx->umem + test_case->req.count,
+				   0, res.ret_value[0] / 2) == NULL);
+		break;
+	case COMP_ZERO_COPY:
+		kunit_info(test, "base_phys=%pa, cnt=%ld, r1=%ld, r2=%ld\n",
+			   (u8 *)__va(res.base_phys), test_case->req.count,
+			   res.ret_value[0], res.ret_value[1]);
+		kunit_hexdump_compare(test, ctx->umem, (u8 *)__va(res.base_phys),
+				   test_case->req.count);
+		KUNIT_EXPECT_EQ(test, res.ret_value[0], test_case->res.ret);
+		KUNIT_EXPECT_EQ(test, res.pos_after[0], res.pos_before[0] + test_case->req.count);
+		KUNIT_EXPECT_TRUE(test, memchr_inv(ctx->umem, 0, res.ret_value[0] / 2) == NULL);
+		KUNIT_EXPECT_MEMEQ(test, ctx->umem + res.ret_value[0] / 2,
+				   (u8 *)__va(res.base_phys + res.ret_value[0] / 2),
+				   res.ret_value[0] / 2);
+		break;
+	case COMP_HALF_COPY:
+		kunit_info(test, "base_phys=%pa, cnt=%ld, r1=%ld, r2=%ld\n",
+			   (u8 *)__va(res.base_phys), test_case->req.count,
+			   res.ret_value[0], res.ret_value[1]);
+		kunit_hexdump_compare(test, ctx->umem, (u8 *)__va(res.base_phys),
+				   test_case->req.count);
+		KUNIT_EXPECT_EQ(test, res.ret_value[0], -EPERM);
+		KUNIT_EXPECT_EQ(test, res.pos_after[0], res.pos_before[0]);
+		KUNIT_EXPECT_MEMEQ(test, ctx->umem, (u8 *)__va(res.base_phys),
+				   res.ret_value[0] / 2);
+		break;
+	case COMP_HALF_ZERO:
+		kunit_info(test, "base_phys=%pa, cnt=%ld, r1=%ld, r2=%ld\n",
+			   (u8 *)__va(res.base_phys), test_case->req.count,
+			   res.ret_value[0], res.ret_value[1]);
+		kunit_hexdump_compare(test, ctx->umem, (u8 *)__va(res.base_phys),
+				   test_case->req.count);
+		KUNIT_EXPECT_EQ(test, res.ret_value[0], -EPERM);
+		KUNIT_EXPECT_EQ(test, res.pos_after[0], res.pos_before[0]);
+		KUNIT_EXPECT_TRUE(test, memchr_inv(ctx->umem, 0, res.ret_value[0] / 2) == NULL);
+		break;
+	case COMP_NOTHING:
+		kunit_info(test, "base_phys=%pa, cnt=%ld, r1=%ld, r2=%ld\n",
+			   (u8 *)__va(res.base_phys), test_case->req.count,
+			   res.ret_value[0], res.ret_value[1]);
+		kunit_hexdump_compare(test, ctx->umem, (u8 *)__va(res.base_phys),
+				   test_case->req.count);
+		KUNIT_EXPECT_EQ(test, res.ret_value[0], -EPERM);
+		KUNIT_EXPECT_EQ(test, res.pos_after[0], res.pos_before[0]);
+		break;
+	default:
+		kunit_skip(test, "Skip reason:%s\n", "Unknown comare strategy");
+	}
+}
+#endif
 
 #ifdef CONFIG_DEVMEM_KUNIT_TEST_IO
 
@@ -1023,6 +1265,7 @@ static void read_mem_io_claimed_addr_single_test(struct kunit *test)
  * The test verifies that:
  *  - no memory is modified
  *  - file position is not advanced
+ *
  * Testable requirements:
  * [read_mem.1]
  */
@@ -1049,7 +1292,9 @@ static struct kunit_case mem_cases[] = {
 	KUNIT_CASE(read_mem_ram_addr_single_test),
 	KUNIT_CASE(read_mem_cross_page_multi_test),
 	KUNIT_CASE(read_mem_ram_addr_single_invalid_user_test),
-	KUNIT_CASE(read_mem_ram_addr_single_edge_test),
+#if defined(CONFIG_IO_STRICT_DEVMEM)
+	KUNIT_CASE_PARAM(read_mem_ram_addr_single_edge_test, edge_test_case_gen_params),
+#endif
 #ifdef CONFIG_DEVMEM_KUNIT_TEST_IO
 	KUNIT_CASE(read_mem_io_free_addr_single_test),
 	KUNIT_CASE(read_mem_io_claimed_addr_single_test),
