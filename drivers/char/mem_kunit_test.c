@@ -751,8 +751,11 @@ static void read_mem_ram_addr_single_invalid_user_test(struct kunit *test)
 		kunit_skip(test, "Skip reason:%s\n", res.skipped_reason);
 		return;
 	}
-
+#if defined(CONFIG_STRICT_DEVMEM)
+	KUNIT_EXPECT_EQ(test, res.ret_value[0], -EPERM);
+#else
 	KUNIT_EXPECT_EQ(test, res.ret_value[0], -EFAULT);
+#endif
 	KUNIT_EXPECT_EQ(test, res.pos_after[0], res.pos_before[0]);
 }
 
