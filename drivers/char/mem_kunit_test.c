@@ -33,6 +33,7 @@ enum phys_addr_type {
 	PHYS_IO_FREE,
 	PHYS_IO_CLAIMED,
 	PHYS_RESTRICTED,
+	PHYS_EDGE_MEM,
 };
 
 /**
@@ -152,6 +153,8 @@ static char *phys_addr_type_str(enum phys_addr_type t) {
 			return "PHYS_IO_CLAIMED";
 		case PHYS_RESTRICTED:
 			return "PHYS_RESTRICTED";
+		case PHYS_EDGE_MEM:
+			return "PHYS_EDGE_MEM";
 		default:
 			return "UNKNOWN";
 	}
@@ -280,6 +283,56 @@ static phys_addr_t pick_restricted_phys_addr(struct kunit *test, size_t count)
 			return p;
 	}
 
+	return 0;
+#endif
+}
+
+/**
+ * pick_mixed_policy_phys_addr - Find a range spanning restricted -> denied pages
+ * @test: KUnit test context.
+ * @count: Number of bytes to read.
+ *
+ * Finds a physical address such that:
+ *   - the first page is "restricted" (page_is_allowed() == 2)
+ *   - the next page is "denied"     (page_is_allowed() == 0)
+ *
+ * Returns:
+ *   Physical address suitable for a mixed-policy read, or 0 if none found.
+ */
+static phys_addr_t pick_mixed_policy_phys_addr(struct kunit *test, size_t count)
+{
+#if !defined(CONFIG_STRICT_DEVMEM)
+	return 0;
+#else
+	phys_addr_t base;
+	unsigned long pfn;
+	phys_addr_t start;
+
+	if (count < 2)
+		return 0;
+
+	base = pick_restricted_phys_addr(test, PAGE_SIZE);
+	if (!base)
+		return 0;
+
+	pfn = PHYS_PFN(base);
+
+	if (page_is_allowed(pfn + 1) == 0) {
+		start = PFN_PHYS(pfn) + PAGE_SIZE - 1;
+
+		if (valid_phys_addr_range(start, count))
+			return start;
+	}
+
+	if (pfn > 0 && page_is_allowed(pfn - 1) == 0) {
+		start = PFN_PHYS(pfn) - 1;
+
+		if (valid_phys_addr_range(start, count))
+			return start;
+	}
+
+	kunit_info(test,
+		   "pick_mixed_policy_phys_addr: no adjacent denied page found\n");
 	return 0;
 #endif
 }
@@ -439,6 +492,9 @@ static phys_addr_t pick_phys_addr_type(struct kunit *test, size_t count,
 
 	case PHYS_RESTRICTED:
 		return pick_restricted_phys_addr(test, count);
+
+	case PHYS_EDGE_MEM:
+		return pick_mixed_policy_phys_addr(test, count);
 
 	default:
 		return 0;
