@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (C) 2025 Red Hat inc
+ * Copyright (C) 2025 Red Hat inc Alessandro Carminati <acarmina@redhat.com>
  */
 
 #ifndef _LINUX_CHAR_MEM_H

@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * TODO: comment
+ * DEVMEM kunit test
+ *
+ * Copyright 2026 Red Hat Inc Alessandro Carminati <acarmina@redhat.com>
  */
 
 #include <kunit/test.h>
@@ -22,6 +24,7 @@
  * @PHYS_IO_FREE:     A non-System-RAM IORESOURCE_MEM range which is not busy/claimed.
  * @PHYS_IO_CLAIMED:  A non-System-RAM IORESOURCE_MEM range which is busy/claimed.
  * @PHYS_RESTRICTED:  System RAM marked as reserved for DEVMEM.
+ * @PHYS_EDGE_MEM:    System RAM at the edge of a reserved zone.
  *
  * These categories map to the two policy gates relevant to /dev/mem:
  *  - CONFIG_STRICT_DEVMEM (Gate 1): blocks System RAM.
@@ -112,7 +115,7 @@ struct read_results {
  * walk_iomem_res_desc() traversal.
  */
 struct pick_ctx {
-	struct kunit *test; // debug
+	struct kunit *test;
 	size_t count;
 	phys_addr_t found;
 	unsigned long found_flags;
@@ -430,13 +433,7 @@ static phys_addr_t pick_invalid_phys_addr(struct kunit *test, size_t count)
  * @ram_buf: Optional output pointer to backing RAM buffer.
  *
  * Selects a physical address suitable for testing read_mem() based on
- * the requested address category:
- *
- *   PHYS_INVALID      - address rejected by valid_phys_addr_range()
- *   PHYS_SYSTEM_RAM   - kmalloc-backed RAM
- *   PHYS_IO_FREE      - unclaimed MMIO region
- *   PHYS_IO_CLAIMED   - claimed MMIO region
- *   PHYS_RESTRICTED   - address returning sanitized reads
+ * the requested address category.
  *
  * Returns the selected physical address, or 0 if no suitable address
  * exists on the current platform.
@@ -663,6 +660,7 @@ static void read_mem_action(struct kunit *test, struct mem_test_ctx *ctx,
  * Ensures that read_mem() correctly rejects physical addresses that
  * fall outside valid_phys_addr_range(), returning -EFAULT and leaving
  * the file position unchanged.
+ *
  * Testable requirements:
  * [read_mem.1]
  * [read_mem.4]
@@ -701,6 +699,7 @@ static void read_mem_invalid_addr_test(struct kunit *test)
  *  - read succeeds
  *  - data is sanitized (zero-filled)
  *  - ppos is advanced
+ *
  * Testable requirements:
  * [read_mem.3]
  * [read_mem.4]
@@ -746,6 +745,7 @@ static void read_mem_restricted_addr_single_test(struct kunit *test)
  * Expected behavior:
  *  - CONFIG_STRICT_DEVMEM: access denied (-EPERM)
  *  - otherwise: read succeeds and data matches backing memory
+ *
  * Testable requirements:
  * [read_mem.2]
  * [read_mem.3]
@@ -795,6 +795,7 @@ static void read_mem_ram_addr_single_test(struct kunit *test)
  * The test uses a RAM-backed physical address and performs a single read
  * operation. The backing memory is seeded so that content verification is
  * possible when access is allowed.
+ *
  * Testable requirements:
  * [read_mem.4]
  */
@@ -825,7 +826,7 @@ static void read_mem_ram_addr_single_edge_test(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, res.pos_after[0], res.pos_before[0]);
 #else
 	kunit_info(test, "\"# CONFIG_STRICT_DEVMEM is not set\" case, expected to match the memory contents\n");
-	KUNIT_EXPECT_EQ(test, res.ret_value[0], -EPERM);
+	KUNIT_EXPECT_EQ(test, res.ret_value[0], req.count);
 	KUNIT_EXPECT_EQ(test, res.pos_after[0], res.pos_before[0] + req.count);
 	KUNIT_EXPECT_MEMEQ(test, ctx->umem, (u8 *)res.backing_kbuf, req.count);
 #endif
@@ -843,6 +844,7 @@ static void read_mem_ram_addr_single_edge_test(struct kunit *test)
  *
  *   - read_mem() returns -EFAULT
  *   - the file position (*ppos) is not advanced
+ *
  * Testable requirements:
  * [read_mem.4]
  */
@@ -885,6 +887,7 @@ static void read_mem_ram_addr_single_invalid_user_test(struct kunit *test)
  *  - correct ppos advancement
  *  - correct multi-read sequencing
  *  - correct data returned for non-strict configurations
+ *
  * Testable requirements:
  * [read_mem.2]
  * [read_mem.3]
@@ -1023,6 +1026,7 @@ static void read_mem_io_claimed_addr_single_test(struct kunit *test)
  * The test verifies that:
  *  - no memory is modified
  *  - file position is not advanced
+ *
  * Testable requirements:
  * [read_mem.1]
  */
